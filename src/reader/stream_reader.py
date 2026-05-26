@@ -27,6 +27,7 @@ def read_serial_rows(
         print(f"Подключено к {port} @ {baudrate} (timeout={timeout}s)")
         while True:
             raw = ser.readline()
+            print(raw)
             if not raw:
                 continue  # таймаут чтения — ждём следующий кадр
 
@@ -34,7 +35,7 @@ def read_serial_rows(
             if not line:
                 continue
 
-            parts = line.split(",")
+            parts = line.split(";")
             if len(parts) < 4:
                 continue
 

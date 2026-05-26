@@ -27,7 +27,7 @@ def display_points_stream(
     plt.ion()
     plt.style.use("dark_background")
 
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig, ax = plt.subplots(figsize=(7, 7))
     half = size / 2 + 5
     ax.set_xlim(-half, half)
     ax.set_ylim(-half, half)
