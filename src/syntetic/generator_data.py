@@ -2,7 +2,7 @@ import random
 from pprint import pprint
 
 
-def genearate_random_data(dimension:int = 2) -> list[list[float]]:
+def generate_random_data(dimension:int = 2) -> list[list[float]]:
     """
     generates a random matrix of photodiodes with values 0 or 1.
     
@@ -17,8 +17,8 @@ def genearate_random_data(dimension:int = 2) -> list[list[float]]:
 
 
 if __name__ == "__main__":
-    data_phd_2x2 = genearate_random_data(2)
-    data_phd_4x4 = genearate_random_data(4)
+    data_phd_2x2 = generate_random_data(2)
+    data_phd_4x4 = generate_random_data(4)
 
     print("Generated 2x2 photodiodes matrix:")
     pprint(data_phd_2x2)
