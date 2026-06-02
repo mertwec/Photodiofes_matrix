@@ -16,3 +16,4 @@ class Frame:
     point: Point2D | None
     v_x: float | None = None
     v_y: float | None = None
+    radius: float | None = None
