@@ -6,7 +6,7 @@ from pathlib import Path
 class SerialConfig:
     # PORT = '/dev/ttyUSB0'  # Измените на ваш порт
     BAUDRATE = 115200      # Измените на скорость вашего устройства (часто 9600, 115200)
-    TIMEOUT = 1.0          # сек на чтение строки
+    TIMEOUT = 0.01          # сек на чтение строки
 
     @property
     def PORT(self):

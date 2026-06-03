@@ -29,10 +29,11 @@ def tee_to_csv(
     её дальше по пайплайну без изменений — поэтому встраивается между
     read_serial_rows и make_point, не нарушая контракт генератора.
 
-    Формат файла повторяет DATA/putty.csv: заголовок s1,s2,s3,s4,v_x,v_y и
-    значения через запятую. Строки сюда приходят уже отфильтрованными
-    (read_serial_rows отбрасывает заголовок/мусор/неполные строки), поэтому
-    пишется только валидное. Отсутствующие v_x/v_y оставляются пустыми.
+    Каждая строка снабжается штампом времени ts (YYYYmmdd_HHMMSS) — это первый
+    столбец; далее s1,s2,s3,s4,v_x,v_y как в DATA/putty.csv. Строки сюда приходят
+    уже отфильтрованными (read_serial_rows отбрасывает заголовок/мусор/неполные
+    строки), поэтому пишется только валидное. Отсутствующие v_x/v_y оставляются
+    пустыми. ts проставляется в момент записи строки (разрешение — секунда).
 
     Файл открывается лениво — на первой строке, чтобы при мгновенном выходе
     не оставался пустой LOG. Каждая строка flush'ится: при обрыве UART/Ctrl-C
@@ -41,16 +42,18 @@ def tee_to_csv(
     :yield: ту же строку dict, что и пришла на вход.
     """
     path = Path(path)
+    fieldnames = ["ts", *columns]
     f = None
     writer: csv.DictWriter | None = None
     try:
         for row in rows:
             if f is None:
                 f = path.open("w", newline="")
-                writer = csv.DictWriter(f, fieldnames=list(columns))
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 print(f"Запись лога: {path}")
-            writer.writerow({c: row.get(c, "") for c in columns})
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S.%f")
+            writer.writerow({"ts": ts, **{c: row.get(c, "") for c in columns}})
             f.flush()
             yield row
     finally:
