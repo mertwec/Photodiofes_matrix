@@ -7,9 +7,9 @@ spot_plot.py
 строит графики, оценивает φc и качество настройки.
 
 Использование:
-    python spot_plot.py COM3          # чтение с USB CDC
+    python spot_plot.py COM6          # чтение с USB CDC
     python spot_plot.py data.csv      # чтение из файла
-    python spot_plot.py COM3 --save   # сохранить в data.csv
+    python spot_plot.py COM6 --save   # сохранить в data.csv
 """
 
 import sys, math, re
