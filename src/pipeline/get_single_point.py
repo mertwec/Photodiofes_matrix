@@ -14,6 +14,7 @@ s2 | s3
 ph = [0,1] # range value
 """
 
+import math
 from typing import Any, Generator, Iterable
 
 import numpy as np
@@ -51,9 +52,42 @@ def light_direction_to_point(matrix_pd: list[list[float]], size: int) -> Point2D
 SENSOR_COLS = ("s1", "s2", "s3", "s4")
 
 
+def spot_radius_px(
+    raw: Iterable[float], size: int,
+    val_max: float, val_min: float,
+) -> float | None:
+    """
+    Радиус пятна в пикселях по абсолютным долям засветки квадрантов.
+
+    Поправка №1: углы v_x/v_y считаются некорректно, привязываться к ним нельзя.
+    Вместо калибровки по свипу используем известные предельные значения квадранта:
+        b_i = (val_min - raw_i) / (val_min - val_max),   b_i ∈ [0, 1]
+    где raw = val_max (≈20) — полная засветка квадранта (b=1),
+        raw = val_min (≈3500) — нет засветки (b=0).
+
+    Модель top-hat: интенсивность пятна по площади равномерна, поэтому
+    засвеченная доля детектора f = mean(b_i) равна доле его площади D² (D = size),
+    покрытой пятном. Приравнивая к площади круга π·r²:
+
+        π·r² = f·D²   ⇒   r = size·√(f/π)
+
+    Результат клампится до 0.95·size/2, чтобы круг не вылезал за дисплей.
+    Возвращает None, если диапазон некорректен или засветки нет (f = 0).
+    """
+    span = val_min - val_max
+    if span <= 0:
+        return None
+    fracs = [min(1.0, max(0.0, (val_min - r) / span)) for r in raw]
+    f = sum(fracs) / len(fracs)
+    if f <= 0:
+        return None
+    r = size * math.sqrt(f / math.pi)
+    return min(r, 0.95 * size / 2)
+
+
 def make_point(
     rows: Iterable[dict], size: int, adc_max: float,
-    spot_r_px: float | None = None,
+    val_max: float | None = None, val_min: float | None = None,
 ) -> Generator[Frame, None, None]:
     """
     Единый конвертер сырых строк датчиков в кадры Frame(point, v_x, v_y, radius).
@@ -67,9 +101,12 @@ def make_point(
     поэтому одна и та же функция подходит и для лога (adc_max берётся из df,
     см. df_to_raw_rows), и для UART (adc_max берётся из конфига).
 
-    spot_r_px — радиус пятна в пикселях из calibrate_phi_c; если None, визуализация
-    пятна отключена (Frame.radius = None).
+    val_max/val_min — предельные сырые значения квадранта (cfg.S_VAL_MAX/S_VAL_MIN).
+    Если оба заданы — на каждый кадр считается радиус пятна (spot_radius_px) из
+    абсолютных долей засветки s1..s4. Если хотя бы один None — пятно не рисуется
+    (Frame.radius = None).
     """
+    spot_on = val_max is not None and val_min is not None
     for row in rows:
         b1 = adc_max - row["s1"]
         b2 = adc_max - row["s2"]
@@ -80,105 +117,14 @@ def make_point(
             [b2, b3],
         ]
         point = light_direction_to_point(matrix, size)
-        yield Frame(point=point, v_x=row.get("v_x"), v_y=row.get("v_y"),
-                    radius=spot_r_px)
-
-
-def make_point_online(
-    rows: Iterable[dict],
-    size: int,
-    adc_max: float,
-    refit_every: int = 10,
-) -> Generator[Frame, None, None]:
-    """
-    Как make_point, но динамически калибрует φc из входящих v_x/v_y.
-
-    Накапливает пары (v_x, rx) / (v_y, ry) и переоценивает φc при двух триггерах:
-      1. новый экстремум |rx| или |ry| (данные расширились → стоит пересчитать)
-      2. каждые refit_every кадров (гарантированный периодический пересчёт)
-
-    Пока данных < 8 или фит не сошёлся — radius=None (круг не рисуется).
-    Прогресс калибровки выводится в консоль перезаписываемой строкой.
-    Требует 6-польного потока (s1..s4, v_x, v_y).
-    """
-    from src.pipeline.calibration import fit_phi_c_from_signals
-
-    phi_x_buf: list[float] = []
-    rx_buf:    list[float] = []
-    phi_y_buf: list[float] = []
-    ry_buf:    list[float] = []
-    S_buf:     list[float] = []
-
-    spot_r_px: float | None = None
-    rx_extreme = ry_extreme = 0.0
-    frame_n = 0
-    printed = False
-
-    _EXTREMUM_DELTA = 0.02   # минимальное приращение |r| для триггера
-    _MIN_POINTS     = 8      # меньше — фит нестабилен
-
-    try:
-        for row in rows:
-            b1 = adc_max - row["s1"]
-            b2 = adc_max - row["s2"]
-            b3 = adc_max - row["s3"]
-            b4 = adc_max - row["s4"]
-            S  = b1 + b2 + b3 + b4
-
-            point = light_direction_to_point([[b1, b4], [b2, b3]], size)
-
-            if S > 0 and "v_x" in row and "v_y" in row:
-                # rx/ry — те же формулы, что в light_direction_to_point
-                # (ph2=b4, ph4=b3, ph1=b1, ph3=b2)
-                rx_val = (b4 + b3 - b1 - b2) / S
-                ry_val = (b1 + b4 - b2 - b3) / S
-
-                phi_x_buf.append(row["v_x"])
-                rx_buf.append(rx_val)
-                phi_y_buf.append(row["v_y"])
-                ry_buf.append(ry_val)
-                S_buf.append(S)
-
-                new_rx = abs(rx_val) > rx_extreme + _EXTREMUM_DELTA
-                new_ry = abs(ry_val) > ry_extreme + _EXTREMUM_DELTA
-                if new_rx: rx_extreme = abs(rx_val)
-                if new_ry: ry_extreme = abs(ry_val)
-
-                periodic = (frame_n % refit_every == 0)
-
-                if (new_rx or new_ry or periodic) and len(phi_x_buf) >= _MIN_POINTS:
-                    S_arr = np.array(S_buf)
-                    calib = fit_phi_c_from_signals(
-                        np.array(phi_x_buf), np.array(rx_buf),
-                        np.array(phi_y_buf), np.array(ry_buf),
-                        sn=S_arr / S_arr.max(),
-                    )
-                    if calib:
-                        new_r = min(
-                            calib.spot_r_px(size),
-                            0.9 * size / 2,
-                        )
-                        if new_r != spot_r_px:
-                            spot_r_px = new_r
-                            print(
-                                f"\r[online-fit] N={len(phi_x_buf):4d}  "
-                                f"φc={calib.phi_c:.2f}  "
-                                f"r_px={spot_r_px:.1f}  "
-                                f"range={calib.phi_range:.1f}      ",
-                                end="", flush=True,
-                            )
-                            printed = True
-
-            yield Frame(
-                point=point,
-                v_x=row.get("v_x"),
-                v_y=row.get("v_y"),
-                radius=spot_r_px,
+        radius = None
+        if spot_on:
+            radius = spot_radius_px(
+                (row["s1"], row["s2"], row["s3"], row["s4"]),
+                size, val_max, val_min,
             )
-            frame_n += 1
-    finally:
-        if printed:
-            print()  # завершить строку после \r-обновлений
+        yield Frame(point=point, v_x=row.get("v_x"), v_y=row.get("v_y"),
+                    radius=radius)
 
 
 def df_to_raw_rows(df: pd.DataFrame) -> tuple[Iterable[dict], float]:
