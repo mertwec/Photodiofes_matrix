@@ -89,6 +89,10 @@ def display_points_stream(
             spot_circle.set_visible(False)
         else:
             line.set_data([point.x], [point.y])
+            # Нет сигнала → красная точка в центре; обычный кадр → белая.
+            color = "red" if frame.no_signal else "white"
+            line.set_markerfacecolor(color)
+            line.set_markeredgecolor(color)
             point_label.set_position((point.x + 1, point.y + 1))
             point_label.set_text(f"({point.x:.1f}, {point.y:.1f})")
             point_label.set_visible(True)

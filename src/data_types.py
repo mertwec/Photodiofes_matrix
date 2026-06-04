@@ -17,3 +17,4 @@ class Frame:
     v_x: float | None = None
     v_y: float | None = None
     radius: float | None = None
+    no_signal: bool = False  # нет сигнала: точка (0,0), рисуется красной
