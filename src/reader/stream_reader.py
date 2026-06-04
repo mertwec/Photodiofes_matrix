@@ -1,8 +1,13 @@
+import re
 from typing import Generator
 
 import serial
 
 from config import cfg
+
+# Устройство шлёт поля через ';' (06800606;0018;0036;0111;0153;-0.079;-0.024),
+# но логи/CSV используют ','. Принимаем оба разделителя.
+_FIELD_SEP = re.compile(r"[;,]")
 
 
 def read_serial_rows(
@@ -12,8 +17,9 @@ def read_serial_rows(
 ) -> Generator[dict, None, None]:
     """
     Подключается к UART и построчно отдаёт распарсенные строки датчиков
-    в новом формате: T,s1,s2,s3,s4,v_x,v_y, где T — время с детектора
-    (первое поле, пробрасывается как есть для записи в лог).
+    в формате T<sep>s1<sep>s2<sep>s3<sep>s4<sep>v_x<sep>v_y, где разделитель
+    sep — ';' (как шлёт устройство) или ',' (CSV-совместимый). T — время с
+    детектора (первое поле, пробрасывается как есть для записи в лог).
 
     Битые/неполные строки и строку заголовка (нечисловые поля) пропускает.
     Закрывает порт при выходе из генератора (GeneratorExit / исключение / EOF).
@@ -36,7 +42,7 @@ def read_serial_rows(
             if not line:
                 continue
 
-            parts = line.split(",")
+            parts = _FIELD_SEP.split(line)
             if len(parts) < 5:
                 continue  # нужно минимум T + 4 датчика
 
