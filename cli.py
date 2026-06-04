@@ -59,7 +59,6 @@ def stream_cmd(port: str, baudrate: int, size: int, adc_max: float, log: bool):
     print(f"PORT: {port}, fit: {online_fit}, log: {log}")
 
     rows = read_serial_rows(port=port, baudrate=baudrate)
-    log_path = None
     if log:
         log_path = make_log_path(cfg.LOG_DIR)
         rows = tee_to_csv(rows, log_path)
