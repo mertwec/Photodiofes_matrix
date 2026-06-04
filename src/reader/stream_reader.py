@@ -12,12 +12,13 @@ def read_serial_rows(
 ) -> Generator[dict, None, None]:
     """
     Подключается к UART и построчно отдаёт распарсенные строки датчиков
-    в формате как в DATA/putty.csv: s1,s2,s3,s4,v_x,v_y.
+    в новом формате: T,s1,s2,s3,s4,v_x,v_y, где T — время с детектора
+    (первое поле, пробрасывается как есть для записи в лог).
 
     Битые/неполные строки и строку заголовка (нечисловые поля) пропускает.
     Закрывает порт при выходе из генератора (GeneratorExit / исключение / EOF).
 
-    :yield: dict со значениями {'s1','s2','s3','s4', и опционально 'v_x','v_y'}.
+    :yield: dict со значениями {'T','s1','s2','s3','s4', и опционально 'v_x','v_y'}.
     """
     port = port or cfg.PORT
     baudrate = baudrate or cfg.BAUDRATE
@@ -35,19 +36,21 @@ def read_serial_rows(
                 continue
 
             parts = line.split(",")
-            if len(parts) < 4:
-                continue
+            if len(parts) < 5:
+                continue  # нужно минимум T + 4 датчика
 
             try:
-                s1, s2, s3, s4 = (float(p) for p in parts[:4])
+                s1, s2, s3, s4 = (float(p) for p in parts[1:5])
             except ValueError:
                 continue  # заголовок или мусор в строке
 
-            row: dict = {"s1": s1, "s2": s2, "s3": s3, "s4": s4}
-            if len(parts) >= 6:
+            # T — время с детектора (первое поле), храним строкой как пришло,
+            # чтобы не потерять исходный формат/точность при записи в лог.
+            row: dict = {"T": parts[0], "s1": s1, "s2": s2, "s3": s3, "s4": s4}
+            if len(parts) >= 7:
                 try:
-                    row["v_x"] = float(parts[4])
-                    row["v_y"] = float(parts[5])
+                    row["v_x"] = float(parts[5])
+                    row["v_y"] = float(parts[6])
                 except ValueError:
                     pass
             yield row

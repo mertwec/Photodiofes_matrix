@@ -57,7 +57,6 @@ def log_cmd(file_path: Path, size: int, interval: float):
 def stream_cmd(port: str, baudrate: int, size: int, adc_max: float, log: bool):
     """Читать данные с UART и отображать в реальном времени."""
     rows = read_serial_rows(port=port, baudrate=baudrate)
-    log_path = None
     if log:
         log_path = make_log_path(cfg.LOG_DIR)
         rows = tee_to_csv(rows, log_path)

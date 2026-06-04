@@ -17,7 +17,7 @@ class SerialConfig:
 
 class DisplayConfig:
     SIZE_DISPLAY = 200  # px
-    INTERVAL = 0.05     # сек между кадрами (для потока имеет смысл 0)
+    INTERVAL = 0.1     # сек между кадрами (для потока имеет смысл 0)
     BASE_DIR = Path(os.path.dirname(__file__))
 
     @property
@@ -30,7 +30,7 @@ class SensorConfig:
     ADC_MAX = 4095
     S_VAL_MAX = 20
     S_VAL_MIN = 3500
-    COLUMNS = ("s1", "s2", "s3", "s4", "v_x", "v_y")
+    COLUMNS = ("T", "s1", "s2", "s3", "s4", "v_x", "v_y")
 
 
 class Config(SerialConfig, DisplayConfig, SensorConfig):
