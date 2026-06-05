@@ -25,7 +25,7 @@ from src.pipeline.spot_geometry import solve_xyr2
 import pandas as pd
 
 
-SENSOR_COLS = ("s1", "s2", "s3", "s4")
+
 
 def light_direction_to_point(matrix_pd: list[list[float]], size: int) -> Point2D | None:
     """
@@ -207,9 +207,9 @@ def df_to_raw_rows(df: pd.DataFrame) -> tuple[Iterable[dict], float]:
     сохраняет относительные амплитуды между s1..s4 (см. комментарий к make_point).
     Колонки v_x, v_y пробрасываются дальше, если присутствуют в df.
     """
-    adc_max = float(df[list(SENSOR_COLS)].to_numpy().max())
+    adc_max = float(df[list(cfg.SENSOR_COLS)].to_numpy().max())
     extra = [c for c in ("T", "v_x", "v_y") if c in df.columns]
-    cols = list(SENSOR_COLS) + extra
+    cols = list(cfg.SENSOR_COLS) + extra
     rows = (
         {col: getattr(row, col) for col in cols}
         for row in df.itertuples(index=False)

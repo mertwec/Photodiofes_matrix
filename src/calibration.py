@@ -1,0 +1,203 @@
+"""
+Предварительная калибровка нож-сканированием по границе квадранта (Задача №4).
+
+Эксперимент А из AI_ANSWER.md (§4): измеряем разностный сигнал детектора в трёх
+положениях луча — центр (i0) и два крайних (i1 право, i2 лево) — и для каждого
+записываем угол поворотного столика. По известному смещению (угол × фокус FOV) и
+измеренному сигналу далее (офлайн) восстанавливается размер пятна `w = x / h⁻¹(D)`,
+где `D = x_norm` — нормированная разность право/лево.
+
+Процедура интерактивна: в окне matplotlib видна live-точка направления засветки;
+по достижении нужного положения (и его удержании cfg.CALIB_HOLD кадров) точка
+становится зелёной, после чего в терминале запрашивается угол столика. Результат
+(углы + усреднённые s1..s4 и метрики) пишется в JSON `CALIB_{timestamp}.json`.
+"""
+
+import json
+import time
+from datetime import datetime
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+
+from config import cfg
+from src.pipeline.get_single_point import quadrant_fracs
+
+# Шаги сканирования: (ключ, человекочитаемое название, тип условия фиксации).
+# Порядок i1/i2 не важен (см. TASK.md).
+_STEPS = (
+    ("i0", "ЦЕНТР (луч по центру)", "center"),
+    ("i1", "крайнее ПРАВОЕ", "right"),
+    ("i2", "крайнее ЛЕВОЕ", "left"),
+)
+
+
+def _read_metrics(row: dict, adc_max: float):
+    """
+    Строка датчиков → (s, x_norm, y_norm, P, sig).
+
+    x_norm/y_norm — нормированное направление (как в light_direction_to_point);
+    x_norm и есть разностный сигнал D по горизонтали (право − лево). sig — max доля
+    засветки квадранта (индикатор присутствия луча). P — суммарная яркость.
+    """
+    s = (float(row["s1"]), float(row["s2"]), float(row["s3"]), float(row["s4"]))
+    b1, b2, b3, b4 = (max(0.0, adc_max - v) for v in s)
+    P = b1 + b2 + b3 + b4
+    if P > 0:
+        x_norm = (b4 + b3 - b1 - b2) / P   # право − лево  (= D)
+        y_norm = (b1 + b4 - b2 - b3) / P   # верх − низ
+    else:
+        x_norm = y_norm = 0.0
+    fracs = quadrant_fracs(s, cfg.S_VAL_MAX, cfg.S_VAL_MIN) or (0.0,)
+    return s, x_norm, y_norm, P, max(fracs)
+
+
+def _pos_ok(kind: str, x_norm: float, y_norm: float, sig: float) -> bool:
+    """Достигнуто ли целевое положение для шага kind (с проверкой наличия луча)."""
+    if sig < cfg.CALIB_MIN_FRAC:
+        return False                       # луча нет / слишком тускло
+    if kind == "center":
+        return abs(x_norm) < cfg.CALIB_CENTER_EPS and abs(y_norm) < cfg.CALIB_CENTER_EPS
+    if kind == "right":
+        return x_norm > cfg.CALIB_SIDE_EPS
+    if kind == "left":
+        return x_norm < -cfg.CALIB_SIDE_EPS
+    return False
+
+
+def _ask_angle(title: str) -> float:
+    """Запросить в терминале угол поворотного столика (град)."""
+    while True:
+        ans = input(f"  Введите угол столика для «{title}» (град): ").strip().replace(",", ".")
+        try:
+            return float(ans)
+        except ValueError:
+            print("  Нужно число, например 2.0 или -2.0")
+
+
+def save_calibration(results: dict, out_dir: Path | str) -> Path:
+    """
+    Сохранить результат калибровки в `CALIB_{timestamp}.json`. Возвращает путь.
+
+    В JSON: углы столика `{"i0":.., "i1":.., "i2":..}` (как в TASK.md) + по каждой
+    точке усреднённые s1..s4, x_norm (D), P и число усреднённых кадров — этого
+    достаточно для последующего офлайн-расчёта размера пятна (AI_ANSWER.md §4.7).
+    """
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    d = Path(out_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / f"CALIB_{ts}.json"
+    angles = {k: results[k]["angle"] for k in results}      # {"i0":0.0,"i1":2.0,"i2":-2.0}
+    payload = {
+        "created": ts,
+        "profile": "gauss_1e2",
+        "fov": cfg.FOV,
+        "angles": angles,
+        "points": results,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def _set_point_color(point, color: str) -> None:
+    point.set_markerfacecolor(color)
+    point.set_markeredgecolor(color)
+
+
+def _run_step(rows, fig, point, hint_text, kind, adc_max, half, state):
+    """
+    Live-цикл одного шага: крутим, пока положение не удержано cfg.CALIB_HOLD кадров.
+
+    Возвращает усреднённую запись {s, x_norm, P, n} либо None (отмена/конец потока).
+    """
+    hold = 0
+    buf: list = []
+    for row in rows:
+        if not state["running"] or not plt.fignum_exists(fig.number):
+            return None
+        s, x_norm, y_norm, P, sig = _read_metrics(row, adc_max)
+        point.set_data([x_norm * half], [y_norm * half])
+        if _pos_ok(kind, x_norm, y_norm, sig):
+            hold += 1
+            buf.append((s, x_norm, P))
+            _set_point_color(point, "lime")
+            hint_text.set_text(f"удержание {hold}/{cfg.CALIB_HOLD}   x={x_norm:+.3f}")
+        else:
+            hold = 0
+            buf.clear()
+            _set_point_color(point, "white")
+            hint_text.set_text(f"наведите в положение   x={x_norm:+.3f}")
+        fig.canvas.draw_idle()
+        fig.canvas.flush_events()
+        time.sleep(0.01)
+        if hold >= cfg.CALIB_HOLD:
+            ss = [r[0] for r in buf]
+            s_avg = [round(sum(c) / len(c), 1) for c in zip(*ss)]
+            x_avg = sum(r[1] for r in buf) / len(buf)
+            P_avg = sum(r[2] for r in buf) / len(buf)
+            hint_text.set_text("ЗАФИКСИРОВАНО — введите угол в терминале")
+            fig.canvas.draw_idle()
+            fig.canvas.flush_events()
+            return {"s": s_avg, "x_norm": round(x_avg, 4),
+                    "P": round(P_avg, 1), "n": len(buf)}
+    return None
+
+
+def run_calibration(rows, adc_max: float, size: int, out_dir: Path | str) -> Path | None:
+    """
+    Провести интерактивную калибровку (3 шага) и сохранить JSON.
+
+    :param rows: генератор строк датчиков (read_serial_rows).
+    :param adc_max: опорный максимум АЦП.
+    :param size: размер дисплея, px.
+    :param out_dir: каталог для CALIB_*.json.
+    :return: путь к сохранённому JSON или None, если калибровка прервана (клавиша q
+             / закрытие окна / обрыв потока).
+    """
+    half = size / 2
+    plt.ion()
+    plt.style.use("dark_background")
+    fig, ax = plt.subplots(figsize=(8, 8))
+    lim = half + 5
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.set_aspect("equal", adjustable="box")
+    ax.axvline(0, color="green", linestyle="--", linewidth=1)
+    ax.axhline(0, color="green", linestyle="--", linewidth=1)
+    # ориентиры зоны «крайних» положений (порог CALIB_SIDE_EPS)
+    ax.axvline(+cfg.CALIB_SIDE_EPS * half, color="gray", linestyle=":", linewidth=1)
+    ax.axvline(-cfg.CALIB_SIDE_EPS * half, color="gray", linestyle=":", linewidth=1)
+
+    title_text = ax.text(0, lim - 8, "", color="white", fontsize=12, ha="center", va="top")
+    hint_text = ax.text(0, -lim + 8, "", color="lightgray", fontsize=10, ha="center", va="bottom")
+    (point,) = ax.plot([0], [0], "o", markersize=12, color="white", zorder=5)
+
+    state = {"running": True}
+
+    def on_key(event):
+        if event.key == "q":
+            state["running"] = False
+
+    fig.canvas.mpl_connect("key_press_event", on_key)
+
+    results: dict = {}
+    try:
+        for key, title, kind in _STEPS:
+            print(f"\n[Калибровка] Шаг {key}: наведите луч — «{title}». (q — отмена)")
+            title_text.set_text(f"Сканирование {key}: {title}")
+            rec = _run_step(rows, fig, point, hint_text, kind, adc_max, half, state)
+            if rec is None:
+                print("[Калибровка] Прервана.")
+                return None
+            rec["angle"] = _ask_angle(title)
+            results[key] = rec
+            print(f"  ✓ {key}: угол={rec['angle']}  x_norm={rec['x_norm']:+.3f}  s={rec['s']}")
+    finally:
+        plt.ioff()
+        plt.close(fig)
+
+    path = save_calibration(results, out_dir)
+    angles = {k: results[k]["angle"] for k in results}
+    print(f"\n[Калибровка] Сохранено: {path}")
+    print(f"[Калибровка] Углы столика: {angles}")
+    return path
