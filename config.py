@@ -7,7 +7,7 @@ class SerialConfig:
     # PORT = '/dev/ttyUSB0'  # Измените на ваш порт
 
     BAUDRATE = 115200      # Измените на скорость вашего устройства (часто 9600, 115200)
-    TIMEOUT = 0.1          # сек на чтение строки
+    TIMEOUT = 1          # сек на чтение строки
 
     @property
     def PORT(self):
