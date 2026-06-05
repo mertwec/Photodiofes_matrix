@@ -25,6 +25,8 @@ from src.pipeline.spot_geometry import solve_xyr2
 import pandas as pd
 
 
+SENSOR_COLS = ("s1", "s2", "s3", "s4")
+
 def light_direction_to_point(matrix_pd: list[list[float]], size: int) -> Point2D | None:
     """
     Docstring для light_direction_to_point
@@ -51,7 +53,26 @@ def light_direction_to_point(matrix_pd: list[list[float]], size: int) -> Point2D
 
     return Point2D(X, Y)
 
-SENSOR_COLS = ("s1", "s2", "s3", "s4")
+
+
+
+def format_duration_hms(t) -> str | None:
+    """
+    Время кадра из T в формате H:M:S.
+
+    T — детекторное время в миллисекундах (счётчик от старта устройства),
+    приходит int (лог) или строкой (UART, напр. '06800606'). Переводим в
+    длительность: T/1000 секунд → ЧЧ:ММ:СС. Возвращает None, если T нет/не число.
+    """
+    if t is None:
+        return None
+    try:
+        total_s = int(float(t)) // 1000
+    except (TypeError, ValueError):
+        return None
+    h, rem = divmod(total_s, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 
 def quadrant_fracs(
@@ -126,6 +147,7 @@ def make_point(
     half = size / 2
     warm: tuple[float, float, float] | None = None  # тёплый старт между кадрами
     for row in rows:
+        ts = format_duration_hms(row.get("T"))  # время кадра H:M:S из T (мс)
         # Яркость = max(0, adc_max - raw). Клампим нулём: при отсутствии сигнала
         # устройство шлёт 4096 (> ADC_MAX) — без клампа это дало бы отрицательную
         # яркость и исказило бы направление в частично засвеченных кадрах.
@@ -139,7 +161,7 @@ def make_point(
             # без окружности — это и есть визуальный признак «сигнала нет».
             warm = None
             yield Frame(point=Point2D(0, 0), v_x=row.get("v_x"),
-                        v_y=row.get("v_y"), radius=None, no_signal=True)
+                        v_y=row.get("v_y"), radius=None, no_signal=True, ts=ts)
             continue
 
         matrix = [
@@ -174,7 +196,7 @@ def make_point(
                     radius = spot_radius_px_fallback(fracs, size)
                     reliable = False
         yield Frame(point=point, v_x=row.get("v_x"), v_y=row.get("v_y"),
-                    radius=radius, spot_reliable=reliable)
+                    radius=radius, spot_reliable=reliable, ts=ts)
 
 
 def df_to_raw_rows(df: pd.DataFrame) -> tuple[Iterable[dict], float]:
@@ -186,7 +208,7 @@ def df_to_raw_rows(df: pd.DataFrame) -> tuple[Iterable[dict], float]:
     Колонки v_x, v_y пробрасываются дальше, если присутствуют в df.
     """
     adc_max = float(df[list(SENSOR_COLS)].to_numpy().max())
-    extra = [c for c in ("v_x", "v_y") if c in df.columns]
+    extra = [c for c in ("T", "v_x", "v_y") if c in df.columns]
     cols = list(SENSOR_COLS) + extra
     rows = (
         {col: getattr(row, col) for col in cols}
