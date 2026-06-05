@@ -36,11 +36,11 @@ def log_cmd(file_path: Path, size: int, interval: float):
     frames = make_point(rows, size, adc_max,
                         val_max=cfg.S_VAL_MAX, val_min=cfg.S_VAL_MIN)
     legend: dict = {
-        "source": file_path.name,
+        "ts:": ,
         "frames": len(df),
-        "adc_max": int(adc_max),
-        "s_max/min": f"{cfg.S_VAL_MAX}/{cfg.S_VAL_MIN}",
-        "quit": "q",
+        # "adc_max": int(adc_max),
+        # "s_max/min": f"{cfg.S_VAL_MAX}/{cfg.S_VAL_MIN}",
+        # "quit": "q",
     }
     display_points_stream(frames, size=size, interval=interval, legend=legend)
 
