@@ -7,7 +7,7 @@ class SerialConfig:
     # PORT = '/dev/ttyUSB0'  # Измените на ваш порт
 
     BAUDRATE = 115200      # Измените на скорость вашего устройства (часто 9600, 115200)
-    TIMEOUT = 0.01          # сек на чтение строки
+    TIMEOUT = 0.1          # сек на чтение строки
 
     @property
     def PORT(self):
@@ -18,7 +18,7 @@ class SerialConfig:
 
 class DisplayConfig:
     SIZE_DISPLAY = 200  # px
-    INTERVAL = 0.1     # сек между кадрами (для потока имеет смысл 0)
+    INTERVAL = 0.05     # сек между кадрами (для потока имеет смысл 0)
     BASE_DIR = Path(os.path.dirname(__file__))
 
     @property
@@ -31,7 +31,7 @@ class SensorConfig:
     # 0..4095), поэтому ADC_MAX = 4096 — такой кадр даёт нулевую яркость по всем
     # датчикам и распознаётся как «нет сигнала» (точка в центре без окружности).
     ADC_MAX = 4096
-    S_VAL_MAX = 20
+    S_VAL_MAX = 0
     S_VAL_MIN = 3500
     COLUMNS = ("T", "s1", "s2", "s3", "s4", "v_x", "v_y")
 

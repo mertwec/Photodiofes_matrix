@@ -56,7 +56,6 @@ def log_cmd(file_path: Path, size: int, interval: float):
               help="Сохранять принятые валидные строки в LOG_{timestamp}.csv.")
 def stream_cmd(port: str, baudrate: int, size: int, adc_max: float, log: bool):
     """Читать данные с UART и отображать в реальном времени."""
-    print(f"PORT: {port}, fit: {online_fit}, log: {log}")
 
     rows = read_serial_rows(port=port, baudrate=baudrate)
     if log:
