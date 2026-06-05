@@ -19,3 +19,4 @@ class Frame:
     radius: float | None = None
     no_signal: bool = False       # нет сигнала: точка (0,0), рисуется красной
     spot_reliable: bool = True    # False (F>F_RELIABLE или nz<2) → круг серый
+    ts: str | None = None         # время кадра из T (мс) в формате H:M:S

@@ -70,6 +70,12 @@ def display_points_stream(
         color="cyan", fontsize=9, ha="right", va="bottom", visible=False,
     )
 
+    # Живое время кадра ts (из T, формат H:M:S) — сверху справа
+    ts_text = ax.text(
+        half - 5, half - 10, "",
+        color="lightgray", fontsize=9, ha="right", va="top", visible=False,
+    )
+
     state = {"running": True}
 
     def on_key(event):
@@ -118,6 +124,12 @@ def display_points_stream(
             v_text.set_visible(True)
         else:
             v_text.set_visible(False)
+
+        if frame.ts:
+            ts_text.set_text(f"ts: {frame.ts}")
+            ts_text.set_visible(True)
+        else:
+            ts_text.set_visible(False)
 
         fig.canvas.draw_idle()
         fig.canvas.flush_events()
