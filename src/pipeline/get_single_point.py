@@ -19,7 +19,9 @@ from typing import Any, Generator, Iterable
 
 import numpy as np
 
+from config import cfg
 from src.data_types import Frame, Point2D
+from src.pipeline.spot_geometry import solve_xyr2
 import pandas as pd
 
 
@@ -52,37 +54,41 @@ def light_direction_to_point(matrix_pd: list[list[float]], size: int) -> Point2D
 SENSOR_COLS = ("s1", "s2", "s3", "s4")
 
 
-def spot_radius_px(
-    raw: Iterable[float], size: int,
-    val_max: float, val_min: float,
-) -> float | None:
+def quadrant_fracs(
+    raw: Iterable[float], val_max: float, val_min: float,
+) -> list[float] | None:
     """
-    Радиус пятна в пикселях по абсолютным долям засветки квадрантов.
+    Абсолютные доли засветки квадрантов b_i ∈ [0, 1] из сырых значений.
 
-    Поправка №1: углы v_x/v_y считаются некорректно, привязываться к ним нельзя.
-    Вместо калибровки по свипу используем известные предельные значения квадранта:
-        b_i = (val_min - raw_i) / (val_min - val_max),   b_i ∈ [0, 1]
+        b_i = clip((val_min - raw_i) / (val_min - val_max), 0, 1)
     где raw = val_max (≈20) — полная засветка квадранта (b=1),
         raw = val_min (≈3500) — нет засветки (b=0).
 
-    Модель top-hat: интенсивность пятна по площади равномерна, поэтому
-    засвеченная доля детектора f = mean(b_i) равна доле его площади D² (D = size),
-    покрытой пятном. Приравнивая к площади круга π·r²:
-
-        π·r² = f·D²   ⇒   r = size·√(f/π)
-
-    Результат клампится до 0.95·size/2, чтобы круг не вылезал за дисплей.
-    Возвращает None, если диапазон некорректен или засветки нет (f = 0).
+    Возвращает None, если диапазон некорректен (val_min ≤ val_max).
     """
     span = val_min - val_max
     if span <= 0:
         return None
-    fracs = [min(1.0, max(0.0, (val_min - r) / span)) for r in raw]
+    return [min(1.0, max(0.0, (val_min - r) / span)) for r in raw]
+
+
+def spot_radius_px_fallback(fracs: list[float], size: int) -> float | None:
+    """
+    Грубая оценка радиуса пятна по сумме засветки (top-hat) — ФОЛБЭК для nz < 2.
+
+    Геометрический решатель (solve_xyr2) требует ≥ 2 засвеченных квадрантов;
+    при nz < 2 задача вырождена. Тогда показываем приблизительный радиус из
+    суммарной доли f = mean(b_i), приравнивая засвеченную площадь к кругу:
+
+        π·r² = f·size²   ⇒   r = size·√(f/π)
+
+    Эта оценка занижает радиус при смещении пятна, поэтому такой кадр помечается
+    как ненадёжный (круг рисуется серым). Клампится до 0.95·size/2; None при f=0.
+    """
     f = sum(fracs) / len(fracs)
     if f <= 0:
         return None
-    r = size * math.sqrt(f / math.pi)
-    return min(r, 0.95 * size / 2)
+    return min(size * math.sqrt(f / math.pi), 0.95 * size / 2)
 
 
 def make_point(
@@ -106,11 +112,19 @@ def make_point(
     см. df_to_raw_rows), и для UART (adc_max берётся из конфига).
 
     val_max/val_min — предельные сырые значения квадранта (cfg.S_VAL_MAX/S_VAL_MIN).
-    Если оба заданы — на каждый кадр считается радиус пятна (spot_radius_px) из
-    абсолютных долей засветки s1..s4. Если хотя бы один None — пятно не рисуется
-    (Frame.radius = None).
+    Если оба заданы — радиус пятна считается геометрическим решателем (Поправка №2):
+    из долей засветки s1..s4 строятся 4 площади пересечения с квадрантами детектора
+    (R1=1) и совместно фитятся (x, y, R2) методом Нелдера–Мида (solve_xyr2). Радиус
+    в пиксели: r_px = R2·size/2. Решатель «тёпло» стартует от прошлого кадра.
+
+    Достоверность: при nz < 2 засвеченных квадрантов задача вырождена — берётся
+    грубый фолбэк по сумме (spot_radius_px_fallback); при остатке F > cfg.F_RELIABLE
+    фит ненадёжен. В обоих случаях Frame.spot_reliable=False (дисплей рисует круг
+    серым). Если val_max/val_min не заданы — пятно не рисуется (radius=None).
     """
     spot_on = val_max is not None and val_min is not None
+    half = size / 2
+    warm: tuple[float, float, float] | None = None  # тёплый старт между кадрами
     for row in rows:
         # Яркость = max(0, adc_max - raw). Клампим нулём: при отсутствии сигнала
         # устройство шлёт 4096 (> ADC_MAX) — без клампа это дало бы отрицательную
@@ -123,6 +137,7 @@ def make_point(
         if b1 + b2 + b3 + b4 <= 0:
             # Сигнала нет (все датчики ≥ adc_max): красная точка в центре (0,0)
             # без окружности — это и есть визуальный признак «сигнала нет».
+            warm = None
             yield Frame(point=Point2D(0, 0), v_x=row.get("v_x"),
                         v_y=row.get("v_y"), radius=None, no_signal=True)
             continue
@@ -133,13 +148,33 @@ def make_point(
         ]
         point = light_direction_to_point(matrix, size)
         radius = None
+        reliable = True
         if spot_on:
-            radius = spot_radius_px(
-                (row["s1"], row["s2"], row["s3"], row["s4"]),
-                size, val_max, val_min,
+            fracs = quadrant_fracs(
+                (row["s1"], row["s2"], row["s3"], row["s4"]), val_max, val_min,
             )
+            if fracs is None:
+                spot_on = False  # некорректный диапазон val_max/val_min
+            else:
+                f1, f2, f3, f4 = fracs
+                nz = sum(f > cfg.FRAC_EPS for f in fracs)
+                if nz >= 2:
+                    # Площади квадрантов PDF (Q1 верх-право, Q2 верх-лево,
+                    # Q3 низ-лево, Q4 низ-право) по раскладке ph↔s:
+                    # ph2=s4, ph1=s1, ph3=s2, ph4=s3. Полный квадрант = π/4.
+                    q = math.pi / 4.0
+                    a_meas = (q * f4, q * f1, q * f2, q * f3)
+                    x, y, r2, fres = solve_xyr2(a_meas, warm=warm)
+                    warm = (x, y, r2)
+                    radius = min(r2 * half, 0.95 * half)
+                    reliable = fres <= cfg.F_RELIABLE
+                else:
+                    # nz < 2 — задача вырождена: грубый фолбэк, кадр ненадёжен.
+                    warm = None
+                    radius = spot_radius_px_fallback(fracs, size)
+                    reliable = False
         yield Frame(point=point, v_x=row.get("v_x"), v_y=row.get("v_y"),
-                    radius=radius)
+                    radius=radius, spot_reliable=reliable)
 
 
 def df_to_raw_rows(df: pd.DataFrame) -> tuple[Iterable[dict], float]:

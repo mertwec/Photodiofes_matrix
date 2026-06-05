@@ -21,9 +21,10 @@ def display_points_stream(
     :param interval: пауза между кадрами в секундах.
     :param legend: словарь {key: value}, рендерится статической подписью снизу.
 
-    Если Frame.radius не None, рисует жёлтую окружность с радиусом radius вокруг точки
-    (визуализация физического размера пятна, откалиброванного из лога).
-    Окно закрывается клавишей 'q' или досрочным завершением генератора.
+    Если Frame.radius не None, рисует окружность радиуса radius вокруг точки
+    (физический размер пятна из геометрического решателя). Цвет: жёлтый —
+    надёжная оценка, серый — ненадёжная (Frame.spot_reliable=False: F>F_RELIABLE
+    или nz<2). Окно закрывается клавишей 'q' или досрочным завершением генератора.
     """
     plt.ion()
     plt.style.use("dark_background")
@@ -101,6 +102,13 @@ def display_points_stream(
             if frame.radius:
                 spot_circle.center = (point.x, point.y)
                 spot_circle.set_radius(frame.radius)
+                # Ненадёжная оценка (F>F_RELIABLE или nz<2) → серый круг.
+                if frame.spot_reliable:
+                    spot_circle.set_facecolor("gold")
+                    spot_circle.set_edgecolor("yellow")
+                else:
+                    spot_circle.set_facecolor("gray")
+                    spot_circle.set_edgecolor("lightgray")
                 spot_circle.set_visible(True)
             else:
                 spot_circle.set_visible(False)
