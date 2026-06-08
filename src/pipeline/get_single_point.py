@@ -115,6 +115,7 @@ def spot_radius_px_fallback(fracs: list[float], size: int) -> float | None:
 def make_point(
     rows: Iterable[dict], size: int, adc_max: float,
     val_max: float | None = None, val_min: float | None = None,
+    fixed_radius: float | None = None,
 ) -> Generator[Frame, None, None]:
     """
     Единый конвертер сырых строк датчиков в кадры Frame(point, v_x, v_y, radius).
@@ -142,6 +143,10 @@ def make_point(
     грубый фолбэк по сумме (spot_radius_px_fallback); при остатке F > cfg.F_RELIABLE
     фит ненадёжен. В обоих случаях Frame.spot_reliable=False (дисплей рисует круг
     серым). Если val_max/val_min не заданы — пятно не рисуется (radius=None).
+
+    fixed_radius (Задача №5) — если задан, радиус пятна ПОСТОЯННЫЙ (из калибровки,
+    см. calib_radius.spot_radius_from_calib) и одинаков для всех кадров с сигналом;
+    покадровый решатель по квадрантам не вызывается, кадр всегда надёжен.
     """
     spot_on = val_max is not None and val_min is not None
     half = size / 2
@@ -171,7 +176,11 @@ def make_point(
         point = light_direction_to_point(matrix, size)
         radius = None
         reliable = True
-        if spot_on:
+        if fixed_radius is not None:
+            # Задача №5: постоянный радиус из калибровки, без расчёта по квадрантам.
+            radius = fixed_radius
+
+        elif spot_on:
             fracs = quadrant_fracs(
                 (row["s1"], row["s2"], row["s3"], row["s4"]), val_max, val_min,
             )
@@ -188,7 +197,7 @@ def make_point(
                     a_meas = (q * f4, q * f1, q * f2, q * f3)
                     x, y, r2, fres = solve_xyr2(a_meas, warm=warm)
                     warm = (x, y, r2)
-                    radius = min(r2 * half, 0.95 * half)
+                    radius = r2 * half
                     reliable = fres <= cfg.F_RELIABLE
                 else:
                     # nz < 2 — задача вырождена: грубый фолбэк, кадр ненадёжен.

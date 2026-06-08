@@ -14,3 +14,8 @@ def normalize_data(df: pd.DataFrame) -> pd.DataFrame:
     adc_max = df[SENSOR_COLS].to_numpy().max()
     df[SENSOR_COLS] = 1 - df[SENSOR_COLS] / adc_max
     return df
+
+
+def normalize_deg(a: float) -> float:
+    """Угол в [-180, 180): раскрутка показаний столика (357.5° → -2.5°)."""
+    return ((a + 180.0) % 360.0) - 180.0

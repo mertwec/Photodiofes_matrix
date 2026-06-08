@@ -86,7 +86,7 @@ def save_calibration(results: dict, out_dir: Path | str) -> Path:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     d = Path(out_dir)
     d.mkdir(parents=True, exist_ok=True)
-    path = d / f"CALIB_{ts}.json"
+    path = d / f"CALIBRATE.json"
     angles = {k: results[k]["angle"] for k in results}      # {"i0":0.0,"i1":2.0,"i2":-2.0}
     payload = {
         "created": ts,

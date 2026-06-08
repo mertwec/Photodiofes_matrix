@@ -35,6 +35,19 @@ class DisplayConfig:
     def CALIB_DIR(self):
         return self.BASE_DIR / "DATA" / "CALIB"
 
+    @property
+    def CALIB_FILE(self):
+        return self.CALIB_DIR / "CALIBRATE.json"
+
+    # Постоянный радиус из калибровки (Задача №5): физический w [мм] → пиксели.
+    # Весь активный размер датчика DET_SIZE_MM отображается на весь дисплей
+    # SIZE_DISPLAY, поэтому масштаб px/мм = SIZE_DISPLAY / DET_SIZE_MM.
+
+
+    @property
+    def CALIB_PX_PER_MM(self):
+        return self.SIZE_DISPLAY / self.DET_SIZE_MM
+
 class SensorConfig:
     # Опорный максимум АЦП: raw 0 — max засвет, ADC_MAX — min засвет (яркость 0).
     # Устройство при отсутствии сигнала шлёт 4096 (на 1 выше 12-битного диапазона
@@ -45,7 +58,9 @@ class SensorConfig:
     S_VAL_MIN = 3500
     COLUMNS = ("T", "s1", "s2", "s3", "s4", "v_x", "v_y")
     SENSOR_COLS = ("s1", "s2", "s3", "s4")
-    FOV = 50e-3 # m
+
+    FOV = 60 # mm
+    DET_SIZE_MM = 14.0  # полный физический размер активной зоны датчика, мм
 
     # --- Геометрический решатель радиуса пятна (Поправка №2, AI_ANSWER.md,
     #     DOCUMENTATION/r2_estimation_algorithm.pdf). Совместный фит (x, y, R2)
