@@ -18,11 +18,15 @@ import math
 from typing import Any, Generator, Iterable
 
 import numpy as np
+from scipy.special import erfinv
 
 from config import cfg
 from src.data_types import Frame, Point2D
 from src.pipeline.spot_geometry import solve_xyr2
 import pandas as pd
+
+# |D| для устойчивой инверсии erfinv (у ±1 → ∞).
+_D_CLIP = 0.999
 
 
 
@@ -73,6 +77,33 @@ def format_duration_hms(t) -> str | None:
     h, rem = divmod(total_s, 3600)
     m, s = divmod(rem, 60)
     return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+def deflection_angles(
+    x_norm: float, y_norm: float, w_mm: float, fov: float,
+) -> tuple[float | None, float | None]:
+    """
+    Углы отклонения центра луча по x/y (градусы) из нормированных разностей и
+    радиуса пятна.
+
+    По нож-модели нормированная разность D (право−лево = x_norm, верх−низ =
+    y_norm) связана со смещением центра d и радиусом пятна w (уровень 1/e²):
+
+        D = erf(√2 · d / w)   ⇒   d = w · erfinv(D) / √2.
+
+    Угол отклонения от оптической оси: θ = atan(d / FOV) (FOV — фокусное
+    расстояние). Так θ зависит и от фокуса, и от радиуса пятна. Возвращает
+    (None, None), если радиус/фокус неположительны.
+    """
+    if w_mm <= 0 or fov <= 0:
+        return None, None
+
+    def ang(d_norm: float) -> float:
+        d_norm = max(-_D_CLIP, min(_D_CLIP, d_norm))
+        d_mm = w_mm * float(erfinv(d_norm)) / math.sqrt(2.0)  # смещение центра, мм
+        return math.degrees(math.atan(d_mm / fov))
+
+    return ang(x_norm), ang(y_norm)
 
 
 def quadrant_fracs(
@@ -161,7 +192,8 @@ def make_point(
         b3 = max(0.0, adc_max - row["s3"])
         b4 = max(0.0, adc_max - row["s4"])
 
-        if b1 + b2 + b3 + b4 <= 0:
+        S = b1 + b2 + b3 + b4
+        if S <= 0:
             # Сигнала нет (все датчики ≥ adc_max): красная точка в центре (0,0)
             # без окружности — это и есть визуальный признак «сигнала нет».
             warm = None
@@ -174,6 +206,10 @@ def make_point(
             [b2, b3],
         ]
         point = light_direction_to_point(matrix, size)
+        # Нормированные разности (как в light_direction_to_point): это сигналы D
+        # для нож-модели — нужны для углов отклонения центра.
+        x_norm = (b4 + b3 - b1 - b2) / S   # право − лево
+        y_norm = (b1 + b4 - b2 - b3) / S   # верх − низ
         radius = None
         reliable = True
         if fixed_radius is not None:
@@ -204,8 +240,17 @@ def make_point(
                     warm = None
                     radius = spot_radius_px_fallback(fracs, size)
                     reliable = False
+
+        # Углы отклонения центра по x/y из фокуса и радиуса пятна (нож-модель).
+        # Радиус в мм: вся зона датчика DET_SIZE_MM ↔ весь дисплей size.
+        angle_x = angle_y = None
+        if radius is not None:
+            w_mm = radius * cfg.DET_SIZE_MM / size
+            angle_x, angle_y = deflection_angles(x_norm, y_norm, w_mm, cfg.FOV)
+
         yield Frame(point=point, v_x=row.get("v_x"), v_y=row.get("v_y"),
-                    radius=radius, spot_reliable=reliable, ts=ts)
+                    radius=radius, spot_reliable=reliable, ts=ts,
+                    angle_x=angle_x, angle_y=angle_y)
 
 
 def df_to_raw_rows(df: pd.DataFrame) -> tuple[Iterable[dict], float]:

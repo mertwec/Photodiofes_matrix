@@ -20,3 +20,5 @@ class Frame:
     no_signal: bool = False       # нет сигнала: точка (0,0), рисуется красной
     spot_reliable: bool = True    # False (F>F_RELIABLE или nz<2) → круг серый
     ts: str | None = None         # время кадра из T (мс) в формате H:M:S
+    angle_x: float | None = None  # угол отклонения центра по x, град (FOV + радиус)
+    angle_y: float | None = None  # угол отклонения центра по y, град (FOV + радиус)

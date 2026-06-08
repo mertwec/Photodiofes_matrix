@@ -51,7 +51,7 @@ def log_cmd(file_path: Path, size: int):
 
     frames = make_point(rows, size, adc_max,
                         val_max=cfg.S_VAL_MAX, val_min=cfg.S_VAL_MIN,
-                        fixed_radius=None # _calib_radius(size)
+                        # fixed_radius= _calib_radius(size)
                         )
     # ts (время из T) рисуется живой подписью покадрово, см. Frame.ts / display.
     legend: dict = {

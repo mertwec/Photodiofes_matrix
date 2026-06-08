@@ -4,6 +4,7 @@ from typing import Iterable
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 
+from config import cfg
 from src.data_types import Frame
 
 
@@ -76,6 +77,21 @@ def display_points_stream(
         color="lightgray", fontsize=9, ha="right", va="top", visible=False,
     )
 
+    # Живой радиус пятна в мм относительно зоны датчика (DET_SIZE_MM) — сверху слева.
+    # Работает и для калибровки (постоянный радиус), и для потокового расчёта:
+    # обе ветки кладут радиус в Frame.radius (px), здесь переводим px → мм.
+    r_text = ax.text(
+        -half + 5, half - 10, "",
+        color="gold", fontsize=9, ha="left", va="top", visible=False,
+    )
+
+    # Углы отклонения центра по x/y (из фокуса и радиуса пятна) — сверху слева,
+    # под строкой радиуса.
+    ang_text = ax.text(
+        -half + 5, half - 24, "",
+        color="lightgreen", fontsize=9, ha="left", va="top", visible=False,
+    )
+
     state = {"running": True}
 
     def on_key(event):
@@ -94,6 +110,8 @@ def display_points_stream(
             point_label.set_visible(False)
             status_text.set_visible(True)
             spot_circle.set_visible(False)
+            r_text.set_visible(False)
+            ang_text.set_visible(False)
         else:
             line.set_data([point.x], [point.y])
             # Нет сигнала → красная точка в центре; обычный кадр → белая.
@@ -116,14 +134,34 @@ def display_points_stream(
                     spot_circle.set_facecolor("gray")
                     spot_circle.set_edgecolor("lightgray")
                 spot_circle.set_visible(True)
+
+                # Радиус пятна в мм: вся зона датчика DET_SIZE_MM ↔ весь дисплей
+                # size, поэтому r_мм = r_px · DET_SIZE_MM / size. В скобках — доля
+                # от полного размера зоны датчика.
+                r_mm = frame.radius * cfg.DET_SIZE_MM / size
+                pct = frame.radius / size * 100.0
+                r_text.set_text(
+                    f"r ≈ {r_mm:.2f} мм ({pct:.0f}% зоны {cfg.DET_SIZE_MM:.0f} мм)"
+                )
+                r_text.set_color("gold" if frame.spot_reliable else "lightgray")
+                r_text.set_visible(True)
             else:
                 spot_circle.set_visible(False)
+                r_text.set_visible(False)
 
         if frame.v_x is not None and frame.v_y is not None:
             v_text.set_text(f"v_x={frame.v_x:+.4f}   v_y={frame.v_y:+.4f}")
             v_text.set_visible(True)
         else:
             v_text.set_visible(False)
+
+        if frame.angle_x is not None and frame.angle_y is not None:
+            ang_text.set_text(
+                f"θx={frame.angle_x:+.2f}°   θy={frame.angle_y:+.2f}°"
+            )
+            ang_text.set_visible(True)
+        else:
+            ang_text.set_visible(False)
 
         if frame.ts:
             ts_text.set_text(f"ts: {frame.ts}")
