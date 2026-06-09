@@ -3,7 +3,7 @@ import time
 from matplotlib import pyplot as plt
 
 from data_types import Point2D
-from pipeline.get_single_point import light_direction_to_point_univ
+from pipeline.get_single_point import light_direction_to_point
 from syntetic.generator_data import generate_random_data
 
 
@@ -133,7 +133,7 @@ def main(size_display: int = 200):
         # p = data_set.pop(0)
 
         # Преобразование матрицы в точку направления засветки
-        point = light_direction_to_point_univ(p, SIZE_DISPLAY - 10)
+        point = light_direction_to_point(p, SIZE_DISPLAY - 10)
         print(f"Photodiodes matrix: {p} => Light direction point: {point}")
 
         # Обновляем положение точки на дисплее

@@ -93,17 +93,20 @@ def log_to_csv(input_log: Path, output_csv: Path) -> int:
 
     return written
 
+def format_duration_hms(t) -> str | None:
+    """
+    Время кадра из T в формате H:M:S.
 
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Конвертер лога UART в CSV (putty-формат).")
-    parser.add_argument("input_log", type=Path, help="Сырой лог (DATA/log.txt).")
-    parser.add_argument("output_csv", type=Path, nargs="?", default=None,
-                        help="Выходной CSV (по умолчанию рядом, с расширением .csv).")
-    args = parser.parse_args()
-
-    out = args.output_csv or args.input_log.with_suffix(".csv")
-    n = log_to_csv(args.input_log, out)
-    print(f"Записано строк: {n} -> {out}")
-
+    T — детекторное время в миллисекундах (счётчик от старта устройства),
+    приходит int (лог) или строкой (UART, напр. '06800606'). Переводим в
+    длительность: T/1000 секунд → ЧЧ:ММ:СС. Возвращает None, если T нет/не число.
+    """
+    if t is None:
+        return None
+    try:
+        total_s = int(float(t)) // 1000
+    except (TypeError, ValueError):
+        return None
+    h, rem = divmod(total_s, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"

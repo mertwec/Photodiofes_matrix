@@ -15,15 +15,16 @@ ph = [0,1] # range value
 """
 
 import math
-from typing import Any, Generator, Iterable
+from typing import Generator, Iterable
 
-import numpy as np
 from scipy.special import erfinv
 
 from config import cfg
 from src.data_types import Frame, Point2D
 from src.pipeline.spot_geometry import solve_xyr2
 import pandas as pd
+
+from src.utils.converter import format_duration_hms
 
 # |D| для устойчивой инверсии erfinv (у ±1 → ∞).
 _D_CLIP = 0.999
@@ -56,27 +57,6 @@ def light_direction_to_point(matrix_pd: list[list[float]], size: int) -> Point2D
     Y = int(y_norm * size / 2)
 
     return Point2D(X, Y)
-
-
-
-
-def format_duration_hms(t) -> str | None:
-    """
-    Время кадра из T в формате H:M:S.
-
-    T — детекторное время в миллисекундах (счётчик от старта устройства),
-    приходит int (лог) или строкой (UART, напр. '06800606'). Переводим в
-    длительность: T/1000 секунд → ЧЧ:ММ:СС. Возвращает None, если T нет/не число.
-    """
-    if t is None:
-        return None
-    try:
-        total_s = int(float(t)) // 1000
-    except (TypeError, ValueError):
-        return None
-    h, rem = divmod(total_s, 3600)
-    m, s = divmod(rem, 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
 
 
 def deflection_angles(
@@ -135,12 +115,12 @@ def spot_radius_px_fallback(fracs: list[float], size: int) -> float | None:
         π·r² = f·size²   ⇒   r = size·√(f/π)
 
     Эта оценка занижает радиус при смещении пятна, поэтому такой кадр помечается
-    как ненадёжный (круг рисуется серым). Клампится до 0.95·size/2; None при f=0.
+    как ненадёжный (круг рисуется серым). Без клампа — реальное значение; None при f=0.
     """
     f = sum(fracs) / len(fracs)
     if f <= 0:
         return None
-    return min(size * math.sqrt(f / math.pi), 0.95 * size / 2)
+    return size * math.sqrt(f / math.pi)
 
 
 def make_point(

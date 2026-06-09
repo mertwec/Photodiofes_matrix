@@ -18,12 +18,16 @@ class SerialConfig:
 
 class DisplayConfig:
     SIZE_DISPLAY = 200  # px
-    INTERVAL = 0.05     # сек между кадрами (для потока имеет смысл 0)
+    INTERVAL = 1     # сек между кадрами (для потока имеет смысл 0)
     BASE_DIR = Path(os.path.dirname(__file__))
 
     @property
     def LOG_DIR(self):
         return self.BASE_DIR / "DATA" / "LOG"
+
+    @property
+    def DATA_DIR(self):
+        return self.BASE_DIR / "DATA"
 
     # --- Калибровка нож-сканированием (Задача №4, AI_ANSWER.md §4) ---
     CALIB_CENTER_EPS = 0.08   # |x_norm|,|y_norm| для фиксации положения «центр»
@@ -36,14 +40,16 @@ class DisplayConfig:
         return self.BASE_DIR / "DATA" / "CALIB"
 
     @property
+    def MEASURE_DIR(self):
+        return self.BASE_DIR / "DATA" / "MEASURE"
+
+    @property
     def CALIB_FILE(self):
-        return self.CALIB_DIR / "CALIBRATE.json"
+        return self.CALIB_DIR / "CALIBRATE_10.json"
 
     # Постоянный радиус из калибровки (Задача №5): физический w [мм] → пиксели.
     # Весь активный размер датчика DET_SIZE_MM отображается на весь дисплей
     # SIZE_DISPLAY, поэтому масштаб px/мм = SIZE_DISPLAY / DET_SIZE_MM.
-
-
     @property
     def CALIB_PX_PER_MM(self):
         return self.SIZE_DISPLAY / self.DET_SIZE_MM
@@ -58,6 +64,10 @@ class SensorConfig:
     S_VAL_MIN = 3500
     COLUMNS = ("T", "s1", "s2", "s3", "s4", "v_x", "v_y")
     SENSOR_COLS = ("s1", "s2", "s3", "s4")
+
+    LAMBDA_UM = 1.064  # длина волны источника λ, мкм (1064 нм)
+    APERTURE_MM = 50.0  # диаметр входной апертуры D, мм
+    DEFOCUS_MM = 17  # дефокус Δz (фокус на 17 мм перед датчиком), мм
 
     FOV = 50 # mm
     DET_SIZE_MM = 14.0  # полный физический размер активной зоны датчика, мм

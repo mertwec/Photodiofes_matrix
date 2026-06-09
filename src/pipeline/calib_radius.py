@@ -16,7 +16,7 @@ FOV — фокусное расстояние из калибровки). Это
 
 Радиус в пиксели: весь датчик (cfg.DET_SIZE_MM) ↔ весь дисплей (size), поэтому
     radius_px = w_mm · cfg.CALIB_PX_PER_MM (= w_mm · size / DET_SIZE_MM)
-с клампом до 0.95·size/2.
+без клампа — возвращаем реальное значение.
 """
 
 import json
@@ -32,7 +32,7 @@ from src.utils.normalization import normalize_deg
 _D_MIN, _D_MAX = 1e-3, 0.999
 
 
-def spot_radius_from_calib(calib_path: Path | str, size: int) -> dict | None:
+def spot_radius_from_calib(calib_path: Path | str) -> dict | None:
     """
     Постоянный радиус пятна по CALIBRATE.json.
 
@@ -45,7 +45,6 @@ def spot_radius_from_calib(calib_path: Path | str, size: int) -> dict | None:
     data = json.loads(path.read_text(encoding="utf-8"))
     pts = data.get("points", {})
     fov = float(cfg.FOV)           # м
-    half = size / 2.0
 
     d0 = float(pts.get("i0", {}).get("x_norm", 0.0))  # смещение нуля (центр)
 
@@ -60,7 +59,7 @@ def spot_radius_from_calib(calib_path: Path | str, size: int) -> dict | None:
         if not (_D_MIN < aD < _D_MAX) or theta == 0.0:
             continue                                 # шум у нуля / насыщение
         ei = float(erfinv(aD))
-        x_mm = fov * math.tan(abs(theta))    # смещение луча, мм
+        x_mm = fov * math.tan(abs(theta))           # смещение луча, мм
         w_mm = math.sqrt(2.0) * x_mm / ei            # радиус пятна (1/e²), мм
         mm_list.append(w_mm)
         per_point[key] = {"D": round(D, 4),
