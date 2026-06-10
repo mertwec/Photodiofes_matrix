@@ -158,10 +158,16 @@ def make_point(
     fixed_radius (Задача №5) — если задан, радиус пятна ПОСТОЯННЫЙ (из калибровки,
     см. calib_radius.spot_radius_from_calib) и одинаков для всех кадров с сигналом;
     покадровый решатель по квадрантам не вызывается, кадр всегда надёжен.
+
+    Потеря позиции (Задача №8): если сигнал пропал на ≥2 квадрантах
+    (nz < cfg.NZ_ANGLE_MIN), угол измерить нельзя — кадр помечается lost=True,
+    точка переносится на край дисплея по направлению последнего измеренного
+    кадра (дисплей рисует её жёлтой, вместо углов — прочерк), круг не рисуется.
     """
     spot_on = val_max is not None and val_min is not None
     half = size / 2
     warm: tuple[float, float, float] | None = None  # тёплый старт между кадрами
+    last_dir: tuple[float, float] | None = None  # направление последнего измерения
     for row in rows:
         ts = format_duration_hms(row.get("T"))  # время кадра H:M:S из T (мс)
         # Яркость = max(0, adc_max - raw). Клампим нулём: при отсутствии сигнала
@@ -190,6 +196,36 @@ def make_point(
         # для нож-модели — нужны для углов отклонения центра.
         x_norm = (b4 + b3 - b1 - b2) / S   # право − лево
         y_norm = (b1 + b4 - b2 - b3) / S   # верх − низ
+
+        # Засвеченность квадрантов нужна и для радиуса (решатель), и для
+        # детекции потери позиции (Задача №8), поэтому считается до веток.
+        fracs = nz = None
+        if spot_on:
+            fracs = quadrant_fracs(
+                (row["s1"], row["s2"], row["s3"], row["s4"]), val_max, val_min,
+            )
+            if fracs is None:
+                spot_on = False  # некорректный диапазон val_max/val_min
+            else:
+                nz = sum(f > cfg.FRAC_EPS for f in fracs)
+
+        if nz is not None and nz < cfg.NZ_ANGLE_MIN:
+            # Задача №8: сигнал пропал на ≥2 квадрантах — угол не измерить.
+            # Точка на краю дисплея по последнему измеренному направлению
+            # (если его нет или оно нулевое — по текущему); дисплей рисует её
+            # жёлтой, вместо углов показывает прочерк.
+            dx, dy = x_norm, y_norm
+            if last_dir is not None and max(abs(last_dir[0]), abs(last_dir[1])) > 0:
+                dx, dy = last_dir
+            m = max(abs(dx), abs(dy))
+            if m > 0:
+                point = Point2D(dx / m * half, dy / m * half)
+            warm = None
+            yield Frame(point=point, v_x=row.get("v_x"), v_y=row.get("v_y"),
+                        radius=None, lost=True, ts=ts, x_norm=x_norm)
+            continue
+
+        last_dir = (x_norm, y_norm)
         radius = None
         reliable = True
         if fixed_radius is not None:
@@ -197,29 +233,23 @@ def make_point(
             radius = fixed_radius
 
         elif spot_on:
-            fracs = quadrant_fracs(
-                (row["s1"], row["s2"], row["s3"], row["s4"]), val_max, val_min,
-            )
-            if fracs is None:
-                spot_on = False  # некорректный диапазон val_max/val_min
+            f1, f2, f3, f4 = fracs
+            if nz >= 2:
+                # Площади квадрантов PDF (Q1 верх-право, Q2 верх-лево,
+                # Q3 низ-лево, Q4 низ-право) по раскладке ph↔s:
+                # ph2=s4, ph1=s1, ph3=s2, ph4=s3. Полный квадрант = π/4.
+                q = math.pi / 4.0
+                a_meas = (q * f4, q * f1, q * f2, q * f3)
+                x, y, r2, fres = solve_xyr2(a_meas, warm=warm)
+                warm = (x, y, r2)
+                radius = r2 * half
+                reliable = fres <= cfg.F_RELIABLE
             else:
-                f1, f2, f3, f4 = fracs
-                nz = sum(f > cfg.FRAC_EPS for f in fracs)
-                if nz >= 2:
-                    # Площади квадрантов PDF (Q1 верх-право, Q2 верх-лево,
-                    # Q3 низ-лево, Q4 низ-право) по раскладке ph↔s:
-                    # ph2=s4, ph1=s1, ph3=s2, ph4=s3. Полный квадрант = π/4.
-                    q = math.pi / 4.0
-                    a_meas = (q * f4, q * f1, q * f2, q * f3)
-                    x, y, r2, fres = solve_xyr2(a_meas, warm=warm)
-                    warm = (x, y, r2)
-                    radius = r2 * half
-                    reliable = fres <= cfg.F_RELIABLE
-                else:
-                    # nz < 2 — задача вырождена: грубый фолбэк, кадр ненадёжен.
-                    warm = None
-                    radius = spot_radius_px_fallback(fracs, size)
-                    reliable = False
+                # nz < 2 — недостижимо при NZ_ANGLE_MIN ≥ 2 (такие кадры ушли
+                # веткой lost выше); фолбэк оставлен на случай меньшего порога.
+                warm = None
+                radius = spot_radius_px_fallback(fracs, size)
+                reliable = False
 
         # Углы отклонения центра по x/y из фокуса и радиуса пятна (нож-модель).
         # Радиус в мм: вся зона датчика DET_SIZE_MM ↔ весь дисплей size.
@@ -230,7 +260,7 @@ def make_point(
 
         yield Frame(point=point, v_x=row.get("v_x"), v_y=row.get("v_y"),
                     radius=radius, spot_reliable=reliable, ts=ts,
-                    angle_x=angle_x, angle_y=angle_y)
+                    angle_x=angle_x, angle_y=angle_y, x_norm=x_norm)
 
 
 def df_to_raw_rows(df: pd.DataFrame) -> tuple[Iterable[dict], float]:

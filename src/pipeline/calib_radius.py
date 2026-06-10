@@ -6,19 +6,29 @@
 физическое свойство оптики, он постоянен.
 
 Модель гаусс-ножа (profile "gauss_1e2"): нормированная разность право/лево
-`D = x_norm` на границе квадрантов связана со смещением луча x и радиусом пятна w
-(по уровню 1/e²):
+`D = erf(√2 · s / w)`, где s — положение центра пятна относительно границы
+квадрантов, w — радиус пятна по уровню 1/e².
 
-    D = erf(√2 · x / w)      ⇒      w = √2 · x / erfinv(D)
+Расчёт — РАЗНОСТЯМИ в пространстве аргумента erfinv (AI_ANALYSE.md §9.5):
 
-Смещение из угла столика и фокуса: `x = FOV · tan(θ)` (θ — угол точки в градусах,
-FOV — фокусное расстояние из калибровки). Это даёт ФИЗИЧЕСКИЙ радиус w [м/мм].
+    erfinv(D_i) − erfinv(D_j) = √2 · (x_i − x_j) / w
+    ⇒   w = √2 · (x_i − x_j) / (erfinv(D_i) − erfinv(D_j))
 
-Радиус в пиксели: весь датчик (cfg.DET_SIZE_MM) ↔ весь дисплей (size), поэтому
-    radius_px = w_mm · cfg.CALIB_PX_PER_MM (= w_mm · size / DET_SIZE_MM)
-без клампа — возвращаем реальное значение.
+где x_i = FOV · tan(CALIB_ANGLE_SCALE · Δθ_i), а Δθ_i = θ_i − θ_{i0} — угол
+относительно ЦЕНТРАЛЬНОЙ точки. В разности смещение нуля (луч в i0 не точно на
+границе) сокращается точно — в отличие от вычитания в D-пространстве, которое
+искажается нелинейностью erf.
+
+Основная оценка — по паре крайних точек (i1, i2): столик ходит только по оси x,
+поэтому точек две. Центр i0 — опора нуля угла и контроль: по нему считаются
+диагностические w каждой боковой точки (расхождение пары — признак асимметрии
+или фона).
+
+Радиус в пиксели: весь датчик (cfg.DET_SIZE_MM) ↔ весь дисплей (SIZE_DISPLAY),
+поэтому radius_px = w_mm · cfg.CALIB_PX_PER_MM — без клампа, реальное значение.
 """
 
+import itertools
 import json
 import math
 from pathlib import Path
@@ -28,48 +38,107 @@ from scipy.special import erfinv
 from config import cfg
 from src.utils.normalization import normalize_deg
 
-# Рабочий диапазон |D| для устойчивой инверсии erfinv: у нуля 0/0, у ±1 → ∞.
-_D_MIN, _D_MAX = 1e-3, 0.999
+# |D| ближе к 1 — насыщение: erfinv → ∞, точка непригодна.
+_D_MAX = 0.999
+# Мин. |erfinv(D_i) − erfinv(D_j)| для устойчивого деления (точки слиплись).
+_EI_MIN = 1e-2
+
+
+def _w_pair(a: tuple[str, float, float], b: tuple[str, float, float]) -> float | None:
+    """w по паре точек (key, D, x_мм); None — пара вырождена или знак не сходится."""
+    (_, da, xa), (_, db, xb) = a, b
+    de = float(erfinv(da)) - float(erfinv(db))
+    if abs(de) < _EI_MIN:
+        return None
+    w = math.sqrt(2.0) * (xa - xb) / de
+    return w if w > 0 else None
+
+
+def spot_radius_from_points(pts: dict) -> dict | None:
+    """
+    Радиус пятна по словарю точек калибровки {key: {x_norm, angle, …}}.
+
+    Используется и офлайн (spot_radius_from_calib), и онлайн из run_calibration
+    для мгновенного контроля после каждой снятой точки (AI_ANALYSE.md §9.4).
+
+    :return: dict {radius_px, w_mm, per_point, warnings} либо None, если годных
+             точек для хотя бы одной пары нет.
+    """
+    fov = float(cfg.FOV)                   # мм
+    warnings: list[str] = []
+
+    p0 = pts.get("i0") or {}
+    theta0 = normalize_deg(float(p0["angle"])) if "angle" in p0 else 0.0
+    d0 = float(p0.get("x_norm", 0.0))
+
+    # Валидные точки: (key, D, x_мм). Центр — опора нуля угла, его x = 0.
+    points: list[tuple[str, float, float]] = []
+    for key, p in pts.items():
+        if "angle" not in p or "x_norm" not in p:
+            continue
+        D = float(p["x_norm"])
+        if abs(D) >= _D_MAX:
+            warnings.append(f"{key}: |D|={abs(D):.3f} в насыщении (≥{_D_MAX}) — точка пропущена")
+            continue
+        if key == "i0":
+            points.append((key, D, 0.0))
+            continue
+        dtheta = normalize_deg(float(p["angle"])) - theta0
+        # Валидация знаков вместо abs() (§9.5): право — положительные D и Δθ.
+        if (D - d0) * dtheta < 0:
+            warnings.append(f"{key}: знак D={D:+.3f} не согласован со знаком "
+                            f"Δθ={dtheta:+.2f}° — проверьте раскладку ph↔s / знак столика")
+        if abs(D) < cfg.CALIB_SIDE_EPS + 0.02:
+            warnings.append(f"{key}: D={D:+.3f} близко к порогу фиксации "
+                            f"({cfg.CALIB_SIDE_EPS}) — точка могла быть снята не в крайнем положении")
+        points.append((key, D, fov * math.tan(math.radians(dtheta))))
+
+    sides = [p for p in points if p[0] != "i0"]
+    center = next((p for p in points if p[0] == "i0"), None)
+
+    # Основная оценка — пары крайних точек (обычно одна: i1−i2).
+    est: list[float] = []
+    for a, b in itertools.combinations(sides, 2):
+        w = _w_pair(a, b)
+        if w is not None:
+            est.append(w)
+        else:
+            warnings.append(f"пара {a[0]}−{b[0]} отброшена (вырождена или w ≤ 0)")
+    # Снята пока одна боковая точка — оценка по паре с центром (онлайн-контроль).
+    if not est and center is not None:
+        est = [w for sp in sides if (w := _w_pair(sp, center)) is not None]
+
+    if not est:
+        return None
+    w_mm = sum(est) / len(est)
+
+    # Диагностика: w каждой боковой точки относительно центра + разброс оценок.
+    per_point: dict = {}
+    diag = list(est)
+    for sp in sides:
+        w = _w_pair(sp, center) if center is not None else None
+        per_point[sp[0]] = {"D": round(sp[1], 4), "x_mm": round(sp[2], 3),
+                            "w_mm": round(w, 3) if w is not None else None}
+        if w is not None:
+            diag.append(w)
+    if abs(d0) > 0.1:
+        warnings.append(f"центр смещён: D(i0)={d0:+.3f} — луч в i0 заметно не на границе")
+    if len(diag) > 1 and max(diag) > 1.2 * min(diag):
+        warnings.append(f"разброс оценок w: {min(diag):.2f}…{max(diag):.2f} мм (>20%) — "
+                        "несимметричные точки или фоновая засветка")
+
+    return {"radius_px": w_mm * cfg.CALIB_PX_PER_MM, "w_mm": w_mm,
+            "per_point": per_point, "warnings": warnings}
 
 
 def spot_radius_from_calib(calib_path: Path | str) -> dict | None:
     """
-    Постоянный радиус пятна по CALIBRATE.json.
+    Постоянный радиус пятна по файлу CALIBRATE.json.
 
-    :return: dict {radius_px, w_mm, per_point} либо None, если файла нет или нет
-             годных боковых точек (|D| вне рабочего диапазона).
+    :return: см. spot_radius_from_points; None — если файла нет.
     """
     path = Path(calib_path)
     if not path.exists():
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
-    pts = data.get("points", {})
-    fov = float(cfg.FOV)           # м
-
-    d0 = float(pts.get("i0", {}).get("x_norm", 0.0))  # смещение нуля (центр)
-
-    mm_list: list[float] = []
-    per_point: dict = {}
-    for key, p in pts.items():
-        if key == "i0":                              # центр — нулевая точка
-            continue
-        D = float(p["x_norm"]) - d0                  # коррекция на центр
-        theta = math.radians(normalize_deg(float(p["angle"])))
-        aD = abs(D)
-        if not (_D_MIN < aD < _D_MAX) or theta == 0.0:
-            continue                                 # шум у нуля / насыщение
-        ei = float(erfinv(aD))
-        x_mm = fov * math.tan(abs(theta))           # смещение луча, мм
-        w_mm = math.sqrt(2.0) * x_mm / ei            # радиус пятна (1/e²), мм
-        mm_list.append(w_mm)
-        per_point[key] = {"D": round(D, 4),
-                          "angle_deg": round(math.degrees(theta), 3),
-                          "w_mm": round(w_mm, 3)}
-
-    if not mm_list:
-        return None
-
-    w_mm = sum(mm_list) / len(mm_list)
-    radius_px = w_mm * cfg.CALIB_PX_PER_MM
-
-    return {"radius_px": radius_px, "w_mm": w_mm, "per_point": per_point}
+    return spot_radius_from_points(data.get("points", {}))

@@ -6,8 +6,8 @@ from pathlib import Path
 class SerialConfig:
     # PORT = '/dev/ttyUSB0'  # Измените на ваш порт
 
-    BAUDRATE = 115200      # Измените на скорость вашего устройства (часто 9600, 115200)
-    TIMEOUT = 1          # сек на чтение строки
+    BAUDRATE = 115200       # Измените на скорость вашего устройства (часто 9600, 115200)
+    TIMEOUT = 1             # сек на чтение строки
 
     @property
     def PORT(self):
@@ -18,7 +18,7 @@ class SerialConfig:
 
 class DisplayConfig:
     SIZE_DISPLAY = 200  # px
-    INTERVAL = 1     # сек между кадрами (для потока имеет смысл 0)
+    INTERVAL = 0.1     # сек между кадрами (только для данных с лога)
     BASE_DIR = Path(os.path.dirname(__file__))
 
     @property
@@ -33,7 +33,7 @@ class DisplayConfig:
     CALIB_CENTER_EPS = 0.08   # |x_norm|,|y_norm| для фиксации положения «центр»
     CALIB_SIDE_EPS = 0.45     # |x_norm| для фиксации «крайнее право/лево»
     CALIB_MIN_FRAC = 0.10     # мин. засветка (max доля квадранта) для валидной позиции
-    CALIB_HOLD = 8            # кадров стабильного удержания позиции → фиксация
+    CALIB_HOLD = 8            # кадров усреднения после подтверждения клавишей «w»
 
     @property
     def CALIB_DIR(self):
@@ -41,7 +41,7 @@ class DisplayConfig:
 
     @property
     def CALIB_FILE(self):
-        return self.CALIB_DIR / "CALIBRATE.json"
+        return self.CALIB_DIR / "CALIBRATE_10.json"
 
     @property
     def MEASURE_DIR(self):
@@ -81,6 +81,11 @@ class SensorConfig:
     R2_CLIP = (0.02, 1.95)  # физически допустимый диапазон R2 (в единицах R1=1)
     F_RELIABLE = 1e-3       # остаток F выше — оценка ненадёжна (круг рисуется серым)
     FRAC_EPS = 0.01         # порог «квадрант засвечен» для подсчёта nz
+
+    # Задача №8: мин. число засвеченных квадрантов для измерения углов.
+    # nz < NZ_ANGLE_MIN (сигнал пропал на ≥2 квадрантах) → потеря позиции:
+    # угол не измерить, точка у края дисплея (жёлтая), вместо углов — прочерк.
+    NZ_ANGLE_MIN = 3
 
 
 class Config(SerialConfig, DisplayConfig, SensorConfig):

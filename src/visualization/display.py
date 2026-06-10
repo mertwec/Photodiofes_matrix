@@ -92,6 +92,12 @@ def display_points_stream(
         color="lightgreen", fontsize=9, ha="left", va="top", visible=False,
     )
 
+    # Разностный сигнал D (право−лево, = x_norm) — сверху слева, под углами.
+    d_text = ax.text(
+        -half + 5, half - 38, "",
+        color="gold", fontsize=9, ha="left", va="top", visible=False,
+    )
+
     state = {"running": True}
 
     def on_key(event):
@@ -114,8 +120,14 @@ def display_points_stream(
             ang_text.set_visible(False)
         else:
             line.set_data([point.x], [point.y])
-            # Нет сигнала → красная точка в центре; обычный кадр → белая.
-            color = "red" if frame.no_signal else "white"
+            # Нет сигнала → красная точка в центре; потеря позиции (Задача №8,
+            # nz < NZ_ANGLE_MIN) → жёлтая точка у края; обычный кадр → белая.
+            if frame.no_signal:
+                color = "red"
+            elif frame.lost:
+                color = "yellow"
+            else:
+                color = "white"
             line.set_markerfacecolor(color)
             line.set_markeredgecolor(color)
             point_label.set_position((point.x + 1, point.y + 1))
@@ -155,13 +167,25 @@ def display_points_stream(
         else:
             v_text.set_visible(False)
 
-        if frame.angle_x is not None and frame.angle_y is not None:
+        if frame.lost:
+            # Потеря позиции: углы не измеряются — показываем прочерк.
+            ang_text.set_text("θx= —   θy= —")
+            ang_text.set_color("yellow")
+            ang_text.set_visible(True)
+        elif frame.angle_x is not None and frame.angle_y is not None:
             ang_text.set_text(
                 f"θx={frame.angle_x:+.2f}°   θy={frame.angle_y:+.2f}°"
             )
+            ang_text.set_color("lightgreen")
             ang_text.set_visible(True)
         else:
             ang_text.set_visible(False)
+
+        if frame.x_norm is not None:
+            d_text.set_text(f"D={frame.x_norm:+.3f}")
+            d_text.set_visible(True)
+        else:
+            d_text.set_visible(False)
 
         if frame.ts:
             ts_text.set_text(f"ts: {frame.ts}")

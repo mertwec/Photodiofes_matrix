@@ -15,19 +15,21 @@ from src.visualization.display import display_points_stream
 DEFAULT_FILE = Path("./DATA/putty.csv")
 
 
-def _calib_radius(size: int, calib_file = cfg.CALIB_FILE) -> float | None:
+def _calib_radius(calib_file = cfg.CALIB_FILE) -> float | None:
     """
     Постоянный радиус пятна из калибровки (Задача №5) или None, если калибровки нет.
 
     Если CALIBRATE.json есть — радиус постоянный (из нож-сканирования), иначе
     откатываемся на покадровый расчёт по квадрантам.
     """
-    info = spot_radius_from_calib(calib_file, size)
+    info = spot_radius_from_calib(calib_file)
     if info is None:
         print("[Радиус] Калибровка не найдена — радиус считается покадрово по квадрантам.")
         return None
     print(f"[Радиус] Постоянный радиус из калибровки: {info['radius_px']:.1f} px "
           f"(w≈{info['w_mm']:.2f} мм). Файл: {calib_file}")
+    for msg in info.get("warnings", []):
+        print(f"[Радиус] ⚠ {msg}")
     return info["radius_px"]
 
 
@@ -52,7 +54,7 @@ def log_cmd(file_path: Path, size: int):
 
     frames = make_point(rows, size, adc_max,
                         val_max=cfg.S_VAL_MAX, val_min=cfg.S_VAL_MIN,
-                        fixed_radius= _calib_radius(size)
+                        fixed_radius= _calib_radius()
                         )
     # ts (время из T) рисуется живой подписью покадрово, см. Frame.ts / display.
     legend: dict = {
@@ -84,7 +86,8 @@ def stream_cmd(port: str, baudrate: int, log: bool):
         # нож-сканирования); иначе считается покадрово по квадрантам (Поправка №1).
         frames = make_point(rows, size, adc_max,
                             val_max=cfg.S_VAL_MAX, val_min=cfg.S_VAL_MIN,
-                            fixed_radius=_calib_radius(size))
+                            fixed_radius=_calib_radius()
+                            )
 
         legend: dict = {
             "port": port,
@@ -103,7 +106,7 @@ def stream_cmd(port: str, baudrate: int, log: bool):
 def calibr_cmd(port: str, baudrate: int):
     """Калибровка нож-сканированием (Задача №4): 3 фиксации → CALIB_*.json."""
     # 3 фиксации (центр + крайнее право/лево): записываем углы столика и сигналы
-    # в CALIB_*.json. q/закрытие окна — отмена.
+    # в CALIBRATE.json. q/закрытие окна — отмена.
     rows = read_serial_rows(port=port, baudrate=baudrate)
     try:
         run_calibration(rows, cfg.ADC_MAX,

@@ -8,9 +8,13 @@
 где `D = x_norm` — нормированная разность право/лево.
 
 Процедура интерактивна: в окне matplotlib видна live-точка направления засветки;
-по достижении нужного положения (и его удержании cfg.CALIB_HOLD кадров) точка
-становится зелёной, после чего в терминале запрашивается угол столика. Результат
-(углы + усреднённые s1..s4 и метрики) пишется в JSON `CALIB_{timestamp}.json`.
+в целевой зоне точка подсвечивается зелёным (подсказка). Фиксация — ТОЛЬКО по
+явному подтверждению клавишей «w» (AI_ANALYSE.md §9.4: автофиксация по
+пересечению порога снимала точку во время движения столика): оператор наводит
+луч, останавливает столик, жмёт «w» — усредняются следующие cfg.CALIB_HOLD
+кадров, затем в терминале запрашивается угол столика. После каждой точки сразу
+пересчитывается и печатается текущая оценка радиуса w (мгновенный контроль
+качества калибровки). Результат пишется в JSON.
 """
 
 import json
@@ -21,6 +25,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 from config import cfg
+from src.pipeline.calib_radius import spot_radius_from_points
 from src.pipeline.get_single_point import quadrant_fracs
 
 # Шаги сканирования: (ключ, человекочитаемое название, тип условия фиксации).
@@ -104,37 +109,63 @@ def _set_point_color(point, color: str) -> None:
     point.set_markeredgecolor(color)
 
 
+def _report_radius(results: dict) -> None:
+    """
+    Мгновенный контроль (AI_ANALYSE.md §9.4): пересчитать и показать w по уже
+    снятым точкам — брак калибровки виден сразу, пока стенд собран.
+    """
+    info = spot_radius_from_points(results)
+    if info is None:
+        return
+    pp = "   ".join(f"{k}: w={v['w_mm']} мм" for k, v in info["per_point"].items()
+                    if v["w_mm"] is not None)
+    print(f"  [w] текущая оценка: w = {info['w_mm']:.2f} мм "
+          f"(r = {info['radius_px']:.1f} px)   {pp}")
+    for msg in info["warnings"]:
+        print(f"  ⚠ {msg}")
+
+
 def _run_step(rows, fig, point, hint_text, kind, adc_max, half, state):
     """
-    Live-цикл одного шага: крутим, пока положение не удержано cfg.CALIB_HOLD кадров.
+    Live-цикл одного шага: оператор наводит луч (в целевой зоне точка зеленеет —
+    это подсказка), останавливает столик и подтверждает клавишей «w». После
+    подтверждения усредняются следующие cfg.CALIB_HOLD кадров (AI_ANALYSE.md
+    §9.4: фиксация только по явной команде, а не по пересечению порога —
+    автофиксация снимала точку, пока столик ещё вращался).
 
     Возвращает усреднённую запись {s, x_norm, P, n} либо None (отмена/конец потока).
     """
-    hold = 0
+    state["capture"] = False
     buf: list = []
     for row in rows:
         if not state["running"] or not plt.fignum_exists(fig.number):
             return None
         s, x_norm, y_norm, P, sig = _read_metrics(row, adc_max)
         point.set_data([x_norm * half], [y_norm * half])
-        if _pos_ok(kind, x_norm, y_norm, sig):
-            hold += 1
-            buf.append((s, x_norm, P))
+        if state["capture"]:
+            buf.append((s, x_norm, P, sig))
             _set_point_color(point, "lime")
-            hint_text.set_text(f"удержание {hold}/{cfg.CALIB_HOLD}   x={x_norm:+.3f}")
+            hint_text.set_text(f"захват {len(buf)}/{cfg.CALIB_HOLD}   x={x_norm:+.3f}")
         else:
-            hold = 0
-            buf.clear()
-            _set_point_color(point, "white")
-            hint_text.set_text(f"наведите в положение   x={x_norm:+.3f}")
+            ok = _pos_ok(kind, x_norm, y_norm, sig)
+            _set_point_color(point, "lime" if ok else "white")
+            hint_text.set_text(f"наведите, остановите столик и нажмите «w»   x={x_norm:+.3f}")
         fig.canvas.draw_idle()
         fig.canvas.flush_events()
         time.sleep(0.01)
-        if hold >= cfg.CALIB_HOLD:
+        if len(buf) >= cfg.CALIB_HOLD:
             ss = [r[0] for r in buf]
             s_avg = [round(sum(c) / len(c), 1) for c in zip(*ss)]
             x_avg = sum(r[1] for r in buf) / len(buf)
             P_avg = sum(r[2] for r in buf) / len(buf)
+            # Контроль качества захвата: дрейф D — столик ещё двигался;
+            # слабый сигнал — луч не на датчике.
+            spread = max(r[1] for r in buf) - min(r[1] for r in buf)
+            if spread > 0.02:
+                print(f"  ⚠ D дрейфовал во время захвата (размах {spread:.3f}) — "
+                      "столик двигался? Точку стоит переснять.")
+            if max(r[3] for r in buf) < cfg.CALIB_MIN_FRAC:
+                print("  ⚠ слабый сигнал во время захвата — луч на датчике?")
             hint_text.set_text("ЗАФИКСИРОВАНО — введите угол в терминале")
             fig.canvas.draw_idle()
             fig.canvas.flush_events()
@@ -177,13 +208,16 @@ def run_calibration(rows, adc_max: float, size: int, out_dir: Path | str) -> Pat
     def on_key(event):
         if event.key == "q":
             state["running"] = False
+        elif event.key == "w":
+            state["capture"] = True
 
     fig.canvas.mpl_connect("key_press_event", on_key)
 
     results: dict = {}
     try:
         for key, title, kind in _STEPS:
-            print(f"\n[Калибровка] Шаг {key}: наведите луч — «{title}». (q — отмена)")
+            print(f"\n[Калибровка] Шаг {key}: наведите луч — «{title}», "
+                  f"остановите столик и нажмите «w». (q — отмена)")
             title_text.set_text(f"Сканирование {key}: {title}")
             rec = _run_step(rows, fig, point, hint_text, kind, adc_max, half, state)
             if rec is None:
@@ -192,6 +226,7 @@ def run_calibration(rows, adc_max: float, size: int, out_dir: Path | str) -> Pat
             rec["angle"] = _ask_angle(title)
             results[key] = rec
             print(f"  ✓ {key}: угол={rec['angle']}  x_norm={rec['x_norm']:+.3f}  s={rec['s']}")
+            _report_radius(results)
     finally:
         plt.ioff()
         plt.close(fig)
