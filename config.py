@@ -40,12 +40,12 @@ class DisplayConfig:
         return self.BASE_DIR / "DATA" / "CALIB"
 
     @property
-    def MEASURE_DIR(self):
-        return self.BASE_DIR / "DATA" / "MEASURE"
+    def CALIB_FILE(self):
+        return self.CALIB_DIR / "CALIBRATE.json"
 
     @property
-    def CALIB_FILE(self):
-        return self.CALIB_DIR / "CALIBRATE_10.json"
+    def MEASURE_DIR(self):
+        return self.BASE_DIR / "DATA" / "MEASURE"
 
     # Постоянный радиус из калибровки (Задача №5): физический w [мм] → пиксели.
     # Весь активный размер датчика DET_SIZE_MM отображается на весь дисплей
