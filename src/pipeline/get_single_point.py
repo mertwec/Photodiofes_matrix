@@ -60,7 +60,7 @@ def deflection_angles(
     x_norm: float,
     y_norm: float,
     w_mm: float,
-    fov: float,
+    foc: float,
 ) -> tuple[float | None, float | None]:
     """
     Углы отклонения центра луча по x/y (градусы) из нормированных разностей и
@@ -75,13 +75,13 @@ def deflection_angles(
     расстояние). Так θ зависит и от фокуса, и от радиуса пятна. Возвращает
     (None, None), если радиус/фокус неположительны.
     """
-    if w_mm <= 0 or fov <= 0:
+    if w_mm <= 0 or foc <= 0:
         return None, None
 
     def ang(d_norm: float) -> float:
         d_norm = max(-_D_CLIP, min(_D_CLIP, d_norm))
         d_mm = w_mm * float(erfinv(d_norm)) / math.sqrt(2.0)  # смещение центра, мм
-        return math.degrees(math.atan(d_mm / fov))
+        return math.degrees(math.atan(d_mm / foc))
 
     return ang(x_norm), ang(y_norm)
 

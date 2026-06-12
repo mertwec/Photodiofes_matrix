@@ -64,7 +64,7 @@ def spot_radius_from_points(pts: dict) -> dict | None:
     :return: dict {radius_px, w_mm, per_point, warnings} либо None, если годных
              точек для хотя бы одной пары нет.
     """
-    fov = float(cfg.FOC)  # мм
+    foc = float(cfg.FOC)  # мм
     warnings: list[str] = []
 
     p0 = pts.get("i0") or {}
@@ -97,7 +97,7 @@ def spot_radius_from_points(pts: dict) -> dict | None:
                 f"{key}: D={D:+.3f} близко к порогу фиксации "
                 f"({cfg.CALIB_SIDE_EPS}) — точка могла быть снята не в крайнем положении"
             )
-        points.append((key, D, fov * math.tan(math.radians(dtheta))))
+        points.append((key, D, foc * math.tan(math.radians(dtheta))))
 
     sides = [p for p in points if p[0] != "i0"]
     center = next((p for p in points if p[0] == "i0"), None)
