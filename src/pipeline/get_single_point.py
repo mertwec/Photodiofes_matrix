@@ -22,7 +22,6 @@ from scipy.special import erfinv
 
 from config import cfg
 from src.data_types import Frame, Point2D
-from src.pipeline.spot_geometry import solve_xyr2
 from src.utils.converter import format_duration_hms
 
 # |D| для устойчивой инверсии erfinv (у ±1 → ∞).
@@ -106,25 +105,6 @@ def quadrant_fracs(
     return [min(1.0, max(0.0, (val_min - r) / span)) for r in raw]
 
 
-def spot_radius_px_fallback(fracs: list[float], size: int) -> float | None:
-    """
-    Грубая оценка радиуса пятна по сумме засветки (top-hat) — ФОЛБЭК для nz < 2.
-
-    Геометрический решатель (solve_xyr2) требует ≥ 2 засвеченных квадрантов;
-    при nz < 2 задача вырождена. Тогда показываем приблизительный радиус из
-    суммарной доли f = mean(b_i), приравнивая засвеченную площадь к кругу:
-
-        π·r² = f·size²   ⇒   r = size·√(f/π)
-
-    Эта оценка занижает радиус при смещении пятна, поэтому такой кадр помечается
-    как ненадёжный (круг рисуется серым). Без клампа — реальное значение; None при f=0.
-    """
-    f = sum(fracs) / len(fracs)
-    if f <= 0:
-        return None
-    return size * math.sqrt(f / math.pi)
-
-
 def make_point(
     rows: Iterable[dict],
     size: int,
@@ -150,28 +130,24 @@ def make_point(
     см. df_to_raw_rows), и для UART (adc_max берётся из конфига).
 
     val_max/val_min — предельные сырые значения квадранта (cfg.S_VAL_MAX/S_VAL_MIN).
-    Если оба заданы — радиус пятна считается геометрическим решателем (Поправка №2):
-    из долей засветки s1..s4 строятся 4 площади пересечения с квадрантами детектора
-    (R1=1) и совместно фитятся (x, y, R2) методом Нелдера–Мида (solve_xyr2). Радиус
-    в пиксели: r_px = R2·size/2. Решатель «тёпло» стартует от прошлого кадра.
+    Нужны ТОЛЬКО для детекции потери позиции (Задача №8): по ним считаются доли
+    засветки квадрантов (quadrant_fracs) и число засвеченных nz. Если не заданы —
+    детекция потери позиции отключена.
 
-    Достоверность: при nz < 2 засвеченных квадрантов задача вырождена — берётся
-    грубый фолбэк по сумме (spot_radius_px_fallback); при остатке F > cfg.F_RELIABLE
-    фит ненадёжен. В обоих случаях Frame.spot_reliable=False (дисплей рисует круг
-    серым). Если val_max/val_min не заданы — пятно не рисуется (radius=None).
-
-    fixed_radius (Задача №5) — если задан, радиус пятна ПОСТОЯННЫЙ (из калибровки,
-    см. calib_radius.spot_radius_from_calib) и одинаков для всех кадров с сигналом;
-    покадровый решатель по квадрантам не вызывается, кадр всегда надёжен.
+    fixed_radius (Задача №5) — ЕДИНСТВЕННЫЙ источник радиуса пятна: постоянный,
+    из калибровки (calib_radius.spot_radius_from_calib по CALIBRATE.json), одинаков
+    для всех кадров с сигналом. Покадровый расчёт радиуса по соотношению засветки
+    квадрантов (геометрический решатель / top-hat) полностью убран: без калибровки
+    radius=None — рисуется только точка, без круга (и без углов отклонения,
+    т.к. для них нужен w).
 
     Потеря позиции (Задача №8): если сигнал пропал на ≥2 квадрантах
     (nz < cfg.NZ_ANGLE_MIN), угол измерить нельзя — кадр помечается lost=True,
     точка переносится на край дисплея по направлению последнего измеренного
     кадра (дисплей рисует её жёлтой, вместо углов — прочерк), круг не рисуется.
     """
-    spot_on = val_max is not None and val_min is not None
+    fracs_on = val_max is not None and val_min is not None
     half = size / 2
-    warm: tuple[float, float, float] | None = None  # тёплый старт между кадрами
     last_dir: tuple[float, float] | None = None  # направление последнего измерения
     for row in rows:
         ts = format_duration_hms(row.get("T"))  # время кадра H:M:S из T (мс)
@@ -188,7 +164,6 @@ def make_point(
         if S <= 0:
             # Сигнала нет (все датчики ≥ adc_max): красная точка в центре (0,0)
             # без окружности — это и есть визуальный признак «сигнала нет».
-            warm = None
             yield Frame(
                 point=Point2D(0, 0),
                 v_x=row.get("v_x"),
@@ -210,17 +185,12 @@ def make_point(
         x_norm = (b4 + b3 - b1 - b2) / S  # право − лево
         y_norm = (b1 + b4 - b2 - b3) / S  # верх − низ
 
-        # Засвеченность квадрантов нужна и для радиуса (решатель), и для
-        # детекции потери позиции (Задача №8), поэтому считается до веток.
-        fracs = nz = None
-        if spot_on:
-            fracs = quadrant_fracs(
-                (row["s1"], row["s2"], row["s3"], row["s4"]),
-                val_max,
-                val_min,
-            )
+        # Засвеченность квадрантов — для детекции потери позиции (Задача №8).
+        nz = None
+        if fracs_on:
+            fracs = quadrant_fracs(s_raw, val_max, val_min)
             if fracs is None:
-                spot_on = False  # некорректный диапазон val_max/val_min
+                fracs_on = False  # некорректный диапазон val_max/val_min
             else:
                 nz = sum(f > cfg.FRAC_EPS for f in fracs)
 
@@ -235,7 +205,6 @@ def make_point(
             m = max(abs(dx), abs(dy))
             if m > 0:
                 point = Point2D(dx / m * half, dy / m * half)
-            warm = None
             yield Frame(
                 point=point,
                 v_x=row.get("v_x"),
@@ -249,30 +218,9 @@ def make_point(
             continue
 
         last_dir = (x_norm, y_norm)
-        radius = None
-        reliable = True
-        if fixed_radius is not None:
-            # Задача №5: постоянный радиус из калибровки, без расчёта по квадрантам.
-            radius = fixed_radius
-
-        elif spot_on:
-            f1, f2, f3, f4 = fracs
-            if nz >= 2:
-                # Площади квадрантов PDF (Q1 верх-право, Q2 верх-лево,
-                # Q3 низ-лево, Q4 низ-право) по раскладке ph↔s:
-                # ph2=s4, ph1=s1, ph3=s2, ph4=s3. Полный квадрант = π/4.
-                q = math.pi / 4.0
-                a_meas = (q * f4, q * f1, q * f2, q * f3)
-                x, y, r2, fres = solve_xyr2(a_meas, warm=warm)
-                warm = (x, y, r2)
-                radius = r2 * half
-                reliable = fres <= cfg.F_RELIABLE
-            else:
-                # nz < 2 — недостижимо при NZ_ANGLE_MIN ≥ 2 (такие кадры ушли
-                # веткой lost выше); фолбэк оставлен на случай меньшего порога.
-                warm = None
-                radius = spot_radius_px_fallback(fracs, size)
-                reliable = False
+        # Задача №5: радиус пятна — только постоянный, из калибровки. Без
+        # CALIBRATE.json radius=None: рисуется только точка, без круга.
+        radius = fixed_radius
 
         # Углы отклонения центра по x/y из фокуса и радиуса пятна (нож-модель).
         # Радиус в мм: вся зона датчика DET_SIZE_MM ↔ весь дисплей size.
@@ -286,7 +234,6 @@ def make_point(
             v_x=row.get("v_x"),
             v_y=row.get("v_y"),
             radius=radius,
-            spot_reliable=reliable,
             ts=ts,
             angle_x=angle_x,
             angle_y=angle_y,
