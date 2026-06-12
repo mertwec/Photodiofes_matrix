@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 import click
@@ -147,17 +148,23 @@ def calibr_cmd(port: str, baudrate: int):
 )
 @click.option("--test/--no-test", default=False, show_default=False, help="Test by log")
 def measure_cmd(port: str, baudrate: int, test: bool):
-    """Режим фиксации данных (Задача №7): w — зафиксировать точку, s — сохранить JSON."""
+    """Режим фиксации данных (Задача №7): w — точка + углы x/y, JSON пишется сам."""
     # Поток как в stream, но без пятна: «w» фиксирует s1..s4 + углы x/y (ввод в
-    # терминале идёт в отдельном потоке), «s» пишет DATA/MEASURE/MEASURE.json.
+    # терминале идёт в отдельном потоке); после ввода обоих углов точка сразу
+    # сохраняется в DATA/MEASURE/MEASURE.json, а входной буфер порта сбрасывается
+    # (flush_event), чтобы дальше читать текущие данные, а не накопленный хвост.
     file_path = Path(cfg.DATA_DIR) / "putty.csv"
+    flush_event = None
     if test:
         df = read_csv_log(file_path)
         rows, adc_max = df_to_raw_rows(df)
     else:
-        rows = read_serial_rows(port=port, baudrate=baudrate)
+        flush_event = threading.Event()
+        rows = read_serial_rows(port=port, baudrate=baudrate, flush_event=flush_event)
     try:
-        run_measure(rows, size=cfg.SIZE_DISPLAY, out_dir=cfg.MEASURE_DIR)
+        run_measure(
+            rows, size=cfg.SIZE_DISPLAY, out_dir=cfg.MEASURE_DIR, flush_event=flush_event
+        )
     finally:
         rows.close()  # освобождаем COM-порт
 

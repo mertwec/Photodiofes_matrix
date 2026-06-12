@@ -1,4 +1,5 @@
 import re
+import threading
 from typing import Generator
 
 import serial
@@ -14,6 +15,7 @@ def read_serial_rows(
     port: str | None = None,
     baudrate: int | None = None,
     timeout: float | None = None,
+    flush_event: threading.Event | None = None,
 ) -> Generator[dict, None, None]:
     """
     Подключается к UART и построчно отдаёт распарсенные строки датчиков
@@ -24,6 +26,13 @@ def read_serial_rows(
     Битые/неполные строки и строку заголовка (нечисловые поля) пропускает.
     Закрывает порт при выходе из генератора (GeneratorExit / исключение / EOF).
 
+    flush_event — запрос сброса входного буфера порта: пока потребитель занят
+    (например, оператор вводит углы в measure), устройство продолжает слать
+    данные и буфер копится — после set() накопленное отбрасывается и следующая
+    строка читается «с этого момента», а не из хвоста буфера. Событие
+    сбрасывается здесь же; первая строка после сброса может быть обрезана —
+    её отбраковывает обычный парсинг.
+
     :yield: dict со значениями {'T','s1','s2','s3','s4', и опционально 'v_x','v_y'}.
     """
     port = port or cfg.PORT
@@ -33,8 +42,10 @@ def read_serial_rows(
     with serial.Serial(port, baudrate, timeout=timeout) as ser:
         print(f"Подключено к {port} @ {baudrate} (timeout={timeout}s)")
         while True:
+            if flush_event is not None and flush_event.is_set():
+                ser.reset_input_buffer()
+                flush_event.clear()
             raw = ser.readline()
-            print(raw)
             if not raw:
                 continue  # таймаут чтения — ждём следующий кадр
 

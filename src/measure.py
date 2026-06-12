@@ -6,15 +6,19 @@
 
   • «w» — зафиксировать значения квадрантов s1..s4 из кадра, пришедшего в
     момент нажатия, и в ОТДЕЛЬНОМ потоке запросить в терминале углы по x и y
-    (input). Результат кладётся в словарь точек под ключом i0, i1, … (по
-    порядку нажатий).
-  • «s» — сохранить накопленный словарь в DATA/MEASURE/MEASURE.json.
+    (input). Точка кладётся в словарь под ключом i0, i1, … (по порядку
+    нажатий) и, как только приняты ОБА угла, словарь сразу сохраняется в
+    DATA/MEASURE/MEASURE.json (автосохранение). После этого сбрасывается
+    входной буфер COM-порта (flush_event): пока оператор вводил углы, буфер
+    копился — дальше читаем то, что приходит сейчас, а не хвост буфера.
+  • «s» — сохранить накопленный словарь вручную (дублирует автосохранение).
   • «q» — выход.
 
 Почему ввод в отдельном потоке: input() блокирует. Окно matplotlib продолжает
 крутиться в главном потоке, поэтому live-точка не подвисает, пока пользователь
 печатает углы в терминале. ВАЖНО: matplotlib не потокобезопасен — из фонового
-потока его не трогаем; поток только спрашивает input() и пишет в словарь под локом.
+потока его не трогаем; поток только спрашивает input(), пишет в словарь и файл
+под локом и взводит flush_event.
 """
 
 import json
@@ -78,13 +82,21 @@ def _set_point_color(point, color: str) -> None:
     point.set_markeredgecolor(color)
 
 
-def run_measure(rows, size: int, out_dir: Path | str) -> None:
+def run_measure(
+    rows,
+    size: int,
+    out_dir: Path | str,
+    flush_event: threading.Event | None = None,
+) -> None:
     """
     Интерактивный режим фиксации данных.
 
     :param rows: генератор строк датчиков (read_serial_rows).
     :param size: размер дисплея, px.
     :param out_dir: каталог для MEASURE.json.
+    :param flush_event: событие сброса входного буфера UART (read_serial_rows);
+        взводится после завершения ввода углов, чтобы дальше читать текущие
+        данные, а не накопившийся за время ввода буфер. None — нет порта (--test).
     """
     half = size / 2
     plt.ion()
@@ -105,7 +117,7 @@ def run_measure(rows, size: int, out_dir: Path | str) -> None:
     ax.text(
         0,
         lim - 4,
-        "measure   w: фиксация   s: сохранить   q: выход",
+        "measure   w: фиксация+автосохранение   s: сохранить   q: выход",
         color="white",
         fontsize=10,
         ha="center",
@@ -122,7 +134,10 @@ def run_measure(rows, size: int, out_dir: Path | str) -> None:
     state = {"running": True, "capturing": False, "msg": "ожидание данных…"}
 
     def _capture(s_vals: list[float]) -> None:
-        """Фоновый поток: запросить углы x/y и записать точку в словарь."""
+        """
+        Фоновый поток: запросить углы x/y, записать точку в словарь и сразу
+        сохранить файл (автосохранение — как только приняты оба значения).
+        """
         try:
             angle_x = _ask_angle("x")
             angle_y = _ask_angle("y")
@@ -130,9 +145,15 @@ def run_measure(rows, size: int, out_dir: Path | str) -> None:
                 key = f"i{len(points)}"
                 points[key] = {"s": s_vals, "angle_x": angle_x, "angle_y": angle_y}
                 n = len(points)
+                path = save_measure(points, out_dir)
             print(f"  ✓ {key}: s={s_vals}  angle_x={angle_x}  angle_y={angle_y}")
-            state["msg"] = f"зафиксировано {key} (точек: {n})"
+            print(f"  [Сохранено] {path}  (точек: {n})")
+            state["msg"] = f"{key} сохранено: {path.name} (точек: {n})"
         finally:
+            # Пока вводились углы, UART копился в буфере — сбрасываем его,
+            # чтобы дальше читать текущие данные (в т.ч. при отмене ввода).
+            if flush_event is not None:
+                flush_event.set()
             state["capturing"] = False
 
     def on_key(event) -> None:
