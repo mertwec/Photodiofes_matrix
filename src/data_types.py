@@ -28,3 +28,4 @@ class Frame:
     angle_x: float | None = None  # угол отклонения центра по x, град (FOC + радиус)
     angle_y: float | None = None  # угол отклонения центра по y, град (FOC + радиус)
     x_norm: float | None = None  # разностный сигнал D (право−лево), [-1, +1]
+    s: tuple[float, float, float, float] | None = None  # сырые s1..s4 кадра (АЦП)

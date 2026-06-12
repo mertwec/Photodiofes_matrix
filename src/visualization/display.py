@@ -148,6 +148,19 @@ def display_points_stream(
         visible=False,
     )
 
+    # Сырые значения каналов s1..s4 в столбик — справа, под временем кадра.
+    s_text = ax.text(
+        half - 5,
+        half - 24,
+        "",
+        color="lightgray",
+        fontsize=9,
+        ha="right",
+        va="top",
+        family="monospace",
+        visible=False,
+    )
+
     state = {"running": True}
 
     def on_key(event):
@@ -240,6 +253,14 @@ def display_points_stream(
             ts_text.set_visible(True)
         else:
             ts_text.set_visible(False)
+
+        if frame.s is not None:
+            s_text.set_text(
+                "\n".join(f"s{i} = {v:.0f}" for i, v in enumerate(frame.s, 1))
+            )
+            s_text.set_visible(True)
+        else:
+            s_text.set_visible(False)
 
         fig.canvas.draw_idle()
         fig.canvas.flush_events()

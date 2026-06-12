@@ -175,6 +175,7 @@ def make_point(
     last_dir: tuple[float, float] | None = None  # направление последнего измерения
     for row in rows:
         ts = format_duration_hms(row.get("T"))  # время кадра H:M:S из T (мс)
+        s_raw = (row["s1"], row["s2"], row["s3"], row["s4"])  # для вывода на дисплей
         # Яркость = max(0, adc_max - raw). Клампим нулём: при отсутствии сигнала
         # устройство шлёт 4096 (> ADC_MAX) — без клампа это дало бы отрицательную
         # яркость и исказило бы направление в частично засвеченных кадрах.
@@ -195,6 +196,7 @@ def make_point(
                 radius=None,
                 no_signal=True,
                 ts=ts,
+                s=s_raw,
             )
             continue
 
@@ -242,6 +244,7 @@ def make_point(
                 lost=True,
                 ts=ts,
                 x_norm=x_norm,
+                s=s_raw,
             )
             continue
 
@@ -288,6 +291,7 @@ def make_point(
             angle_x=angle_x,
             angle_y=angle_y,
             x_norm=x_norm,
+            s=s_raw,
         )
 
 

@@ -134,7 +134,7 @@ def _report_radius(results: dict) -> None:
         print(f"  ⚠ {msg}")
 
 
-def _run_step(rows, fig, point, hint_text, kind, adc_max, half, state):
+def _run_step(rows, fig, point, hint_text, s_text, kind, adc_max, half, state):
     """
     Live-цикл одного шага: оператор наводит луч (в целевой зоне точка зеленеет —
     это подсказка), останавливает столик и подтверждает клавишей «w». После
@@ -151,6 +151,7 @@ def _run_step(rows, fig, point, hint_text, kind, adc_max, half, state):
             return None
         s, x_norm, y_norm, P, sig = _read_metrics(row, adc_max)
         point.set_data([x_norm * half], [y_norm * half])
+        s_text.set_text("\n".join(f"s{i} = {v:.0f}" for i, v in enumerate(s, 1)))
         if state["capture"]:
             buf.append((s, x_norm, P, sig))
             _set_point_color(point, "lime")
@@ -224,6 +225,17 @@ def run_calibration(
     hint_text = ax.text(
         0, -lim + 8, "", color="lightgray", fontsize=10, ha="center", va="bottom"
     )
+    # Сырые значения каналов s1..s4 в столбик — слева сверху.
+    s_text = ax.text(
+        -lim + 8,
+        lim - 8,
+        "",
+        color="lightgray",
+        fontsize=9,
+        ha="left",
+        va="top",
+        family="monospace",
+    )
     (point,) = ax.plot([0], [0], "o", markersize=12, color="white", zorder=5)
 
     state = {"running": True}
@@ -244,7 +256,9 @@ def run_calibration(
                 f"остановите столик и нажмите «w». (q — отмена)"
             )
             title_text.set_text(f"Сканирование {key}: {title}")
-            rec = _run_step(rows, fig, point, hint_text, kind, adc_max, half, state)
+            rec = _run_step(
+                rows, fig, point, hint_text, s_text, kind, adc_max, half, state
+            )
             if rec is None:
                 print("[Калибровка] Прервана.")
                 return None

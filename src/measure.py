@@ -126,6 +126,17 @@ def run_measure(
     info = ax.text(
         -lim + 4, -lim + 4, "", color="lightgray", fontsize=9, ha="left", va="bottom"
     )
+    # Сырые значения каналов s1..s4 в столбик — слева сверху.
+    s_text = ax.text(
+        -lim + 4,
+        lim - 10,
+        "",
+        color="lightgray",
+        fontsize=9,
+        ha="left",
+        va="top",
+        family="monospace",
+    )
     (point,) = ax.plot([0], [0], "o", markersize=8, color="white", zorder=5)
 
     latest: list = []  # сырые s1..s4 последнего пришедшего кадра
@@ -191,6 +202,7 @@ def run_measure(
             s, x_px, y_px = _read_point(row, half)
             latest = s  # запоминаем последний кадр для фиксации по «w»
             point.set_data([x_px], [y_px])
+            s_text.set_text("\n".join(f"s{i} = {v:.0f}" for i, v in enumerate(s, 1)))
             # Во время ввода углов точка зелёная — индикатор, что кадр зафиксирован.
             _set_point_color(point, "lime" if state["capturing"] else "white")
             info.set_text(f"точек: {len(points)}   {state['msg']}")
