@@ -8,6 +8,26 @@ from config import cfg
 from src.data_types import Frame
 
 
+def draw_quadrant_labels(ax, half: float) -> None:
+    """
+    Тёмно-серые подписи квадрантов S1..S4 в центрах четвертей дисплея.
+
+    Раскладка — физическая, как у датчика (CSV/UART): s1|s4 сверху, s2|s3 снизу
+    (см. ph↔s в get_single_point). half — половина размера дисплея, px.
+    Используется всеми режимами (log/stream, calibr, measure).
+    """
+    q = half / 2
+    for lbl, (x, y) in (
+        ("S1", (-q, q)),
+        ("S4", (q, q)),
+        ("S2", (-q, -q)),
+        ("S3", (q, -q)),
+    ):
+        ax.text(
+            x, y, lbl, color="dimgray", fontsize=18, ha="center", va="center", zorder=1
+        )
+
+
 def display_points_stream(
     frames: Iterable[Frame],
     size: int = 200,
@@ -37,6 +57,7 @@ def display_points_stream(
     ax.set_aspect("equal", adjustable="box")
     ax.axvline(0, color="green", linestyle="--", linewidth=1)
     ax.axhline(0, color="green", linestyle="--", linewidth=1)
+    draw_quadrant_labels(ax, size / 2)
 
     status_text = ax.text(
         -half + 5,

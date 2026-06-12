@@ -17,7 +17,7 @@ class SerialConfig:
 
 
 class DisplayConfig:
-    SIZE_DISPLAY = 200  # px
+    SIZE_DISPLAY = 140  # px
     INTERVAL = 0.1  # сек между кадрами (только для данных с лога)
     BASE_DIR = Path(os.path.dirname(__file__))
 
@@ -34,7 +34,7 @@ class DisplayConfig:
     CALIB_SIDE_EPS = 0.45  # |x_norm| для фиксации «крайнее право/лево»
     CALIB_MIN_FRAC = 0.10  # мин. засветка (max доля квадранта) для валидной позиции
     CALIB_HOLD = 8  # кадров усреднения после подтверждения клавишей «w»
-    DET_SIZE_MM = 14.0  # mm
+
 
     @property
     def CALIB_DIR(self):
@@ -42,7 +42,7 @@ class DisplayConfig:
 
     @property
     def CALIB_FILE(self):
-        return self.CALIB_DIR / "CALIBRATE_10.json"
+        return self.CALIB_DIR / "CALIBRATE.json"
 
     @property
     def MEASURE_DIR(self):
@@ -62,14 +62,15 @@ class SensorConfig:
     # 0..4095), поэтому ADC_MAX = 4096 — такой кадр даёт нулевую яркость по всем
     # датчикам и распознаётся как «нет сигнала» (точка в центре без окружности).
     ADC_MAX = 3500
-    S_VAL_MAX = 0
-    S_VAL_MIN = 3500
+    S_VAL_MAX = 40
+    S_VAL_MIN = 3350
     COLUMNS = ("T", "s1", "s2", "s3", "s4", "v_x", "v_y")
     SENSOR_COLS = ("s1", "s2", "s3", "s4")
 
     LAMBDA_UM = 1.064  # длина волны источника λ, мкм (1064 нм)
     APERTURE_MM = 50.0  # диаметр входной апертуры D, мм
     DEFOCUS_MM = 17  # дефокус Δz (фокус на 17 мм перед датчиком), мм
+    DET_SIZE_MM = 14.0  # mm
 
     FOC = 50  # mm
 

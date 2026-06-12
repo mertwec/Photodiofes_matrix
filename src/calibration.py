@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 from config import cfg
 from src.pipeline.calib_radius import spot_radius_from_points
 from src.pipeline.get_single_point import quadrant_fracs
+from src.visualization.display import draw_quadrant_labels
 
 # Шаги сканирования: (ключ, человекочитаемое название, тип условия фиксации).
 # Порядок i1/i2 не важен (см. TASK.md).
@@ -215,6 +216,7 @@ def run_calibration(
     ax.set_aspect("equal", adjustable="box")
     ax.axvline(0, color="green", linestyle="--", linewidth=1)
     ax.axhline(0, color="green", linestyle="--", linewidth=1)
+    draw_quadrant_labels(ax, half)
     # ориентиры зоны «крайних» положений (порог CALIB_SIDE_EPS)
     ax.axvline(+cfg.CALIB_SIDE_EPS * half, color="gray", linestyle=":", linewidth=1)
     ax.axvline(-cfg.CALIB_SIDE_EPS * half, color="gray", linestyle=":", linewidth=1)

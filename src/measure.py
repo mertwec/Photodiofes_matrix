@@ -30,6 +30,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 from config import cfg
+from src.visualization.display import draw_quadrant_labels
 
 
 def _read_point(row: dict, half: float) -> tuple[tuple[float, ...], float, float]:
@@ -114,6 +115,7 @@ def run_measure(
     ax.set_aspect("equal", adjustable="box")
     ax.axvline(0, color="green", linestyle="--", linewidth=1)
     ax.axhline(0, color="green", linestyle="--", linewidth=1)
+    draw_quadrant_labels(ax, half)
     ax.text(
         0,
         lim - 4,
