@@ -34,6 +34,7 @@ class DisplayConfig:
     CALIB_SIDE_EPS = 0.45  # |x_norm| для фиксации «крайнее право/лево»
     CALIB_MIN_FRAC = 0.10  # мин. засветка (max доля квадранта) для валидной позиции
     CALIB_HOLD = 8  # кадров усреднения после подтверждения клавишей «w»
+    DET_SIZE_MM = 14.0  # mm
 
     @property
     def CALIB_DIR(self):
