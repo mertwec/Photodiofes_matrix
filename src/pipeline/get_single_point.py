@@ -17,26 +17,23 @@ ph = [0,1] # range value
 import math
 from typing import Generator, Iterable
 
+import pandas as pd
 from scipy.special import erfinv
 
 from config import cfg
 from src.data_types import Frame, Point2D
 from src.pipeline.spot_geometry import solve_xyr2
-import pandas as pd
-
 from src.utils.converter import format_duration_hms
 
 # |D| для устойчивой инверсии erfinv (у ±1 → ∞).
 _D_CLIP = 0.999
 
 
-
-
 def light_direction_to_point(matrix_pd: list[list[float]], size: int) -> Point2D | None:
     """
     Docstring для light_direction_to_point
     Преобразует матрицу фотодиодов в точку направления засветки. для матрицы 2x2.
-    
+
     :param matrix_pd: Описание
     :param size: размер окна визуализации
     :rtype: Point2D | координаты точки визуализации
@@ -50,8 +47,8 @@ def light_direction_to_point(matrix_pd: list[list[float]], size: int) -> Point2D
         return None
 
     # нормализованное направление [-1, +1]
-    x_norm = (p2 + p4 - p1 - p3) / S   # вправо +
-    y_norm = (p1 + p2 - p3 - p4) / S   # вверх +
+    x_norm = (p2 + p4 - p1 - p3) / S  # вправо +
+    y_norm = (p1 + p2 - p3 - p4) / S  # вверх +
 
     X = int(x_norm * size / 2)
     Y = int(y_norm * size / 2)
@@ -60,7 +57,10 @@ def light_direction_to_point(matrix_pd: list[list[float]], size: int) -> Point2D
 
 
 def deflection_angles(
-    x_norm: float, y_norm: float, w_mm: float, fov: float,
+    x_norm: float,
+    y_norm: float,
+    w_mm: float,
+    fov: float,
 ) -> tuple[float | None, float | None]:
     """
     Углы отклонения центра луча по x/y (градусы) из нормированных разностей и
@@ -71,7 +71,7 @@ def deflection_angles(
 
         D = erf(√2 · d / w)   ⇒   d = w · erfinv(D) / √2.
 
-    Угол отклонения от оптической оси: θ = atan(d / FOV) (FOV — фокусное
+    Угол отклонения от оптической оси: θ = atan(d / FOC) (FOC — фокусное
     расстояние). Так θ зависит и от фокуса, и от радиуса пятна. Возвращает
     (None, None), если радиус/фокус неположительны.
     """
@@ -87,7 +87,9 @@ def deflection_angles(
 
 
 def quadrant_fracs(
-    raw: Iterable[float], val_max: float, val_min: float,
+    raw: Iterable[float],
+    val_max: float,
+    val_min: float,
 ) -> list[float] | None:
     """
     Абсолютные доли засветки квадрантов b_i ∈ [0, 1] из сырых значений.
@@ -124,8 +126,11 @@ def spot_radius_px_fallback(fracs: list[float], size: int) -> float | None:
 
 
 def make_point(
-    rows: Iterable[dict], size: int, adc_max: float,
-    val_max: float | None = None, val_min: float | None = None,
+    rows: Iterable[dict],
+    size: int,
+    adc_max: float,
+    val_max: float | None = None,
+    val_min: float | None = None,
     fixed_radius: float | None = None,
 ) -> Generator[Frame, None, None]:
     """
@@ -183,8 +188,14 @@ def make_point(
             # Сигнала нет (все датчики ≥ adc_max): красная точка в центре (0,0)
             # без окружности — это и есть визуальный признак «сигнала нет».
             warm = None
-            yield Frame(point=Point2D(0, 0), v_x=row.get("v_x"),
-                        v_y=row.get("v_y"), radius=None, no_signal=True, ts=ts)
+            yield Frame(
+                point=Point2D(0, 0),
+                v_x=row.get("v_x"),
+                v_y=row.get("v_y"),
+                radius=None,
+                no_signal=True,
+                ts=ts,
+            )
             continue
 
         matrix = [
@@ -194,15 +205,17 @@ def make_point(
         point = light_direction_to_point(matrix, size)
         # Нормированные разности (как в light_direction_to_point): это сигналы D
         # для нож-модели — нужны для углов отклонения центра.
-        x_norm = (b4 + b3 - b1 - b2) / S   # право − лево
-        y_norm = (b1 + b4 - b2 - b3) / S   # верх − низ
+        x_norm = (b4 + b3 - b1 - b2) / S  # право − лево
+        y_norm = (b1 + b4 - b2 - b3) / S  # верх − низ
 
         # Засвеченность квадрантов нужна и для радиуса (решатель), и для
         # детекции потери позиции (Задача №8), поэтому считается до веток.
         fracs = nz = None
         if spot_on:
             fracs = quadrant_fracs(
-                (row["s1"], row["s2"], row["s3"], row["s4"]), val_max, val_min,
+                (row["s1"], row["s2"], row["s3"], row["s4"]),
+                val_max,
+                val_min,
             )
             if fracs is None:
                 spot_on = False  # некорректный диапазон val_max/val_min
@@ -221,8 +234,15 @@ def make_point(
             if m > 0:
                 point = Point2D(dx / m * half, dy / m * half)
             warm = None
-            yield Frame(point=point, v_x=row.get("v_x"), v_y=row.get("v_y"),
-                        radius=None, lost=True, ts=ts, x_norm=x_norm)
+            yield Frame(
+                point=point,
+                v_x=row.get("v_x"),
+                v_y=row.get("v_y"),
+                radius=None,
+                lost=True,
+                ts=ts,
+                x_norm=x_norm,
+            )
             continue
 
         last_dir = (x_norm, y_norm)
@@ -256,11 +276,19 @@ def make_point(
         angle_x = angle_y = None
         if radius is not None:
             w_mm = radius * cfg.DET_SIZE_MM / size
-            angle_x, angle_y = deflection_angles(x_norm, y_norm, w_mm, cfg.FOV)
+            angle_x, angle_y = deflection_angles(x_norm, y_norm, w_mm, cfg.FOC)
 
-        yield Frame(point=point, v_x=row.get("v_x"), v_y=row.get("v_y"),
-                    radius=radius, spot_reliable=reliable, ts=ts,
-                    angle_x=angle_x, angle_y=angle_y, x_norm=x_norm)
+        yield Frame(
+            point=point,
+            v_x=row.get("v_x"),
+            v_y=row.get("v_y"),
+            radius=radius,
+            spot_reliable=reliable,
+            ts=ts,
+            angle_x=angle_x,
+            angle_y=angle_y,
+            x_norm=x_norm,
+        )
 
 
 def df_to_raw_rows(df: pd.DataFrame) -> tuple[Iterable[dict], float]:
@@ -275,7 +303,6 @@ def df_to_raw_rows(df: pd.DataFrame) -> tuple[Iterable[dict], float]:
     extra = [c for c in ("T", "v_x", "v_y") if c in df.columns]
     cols = list(cfg.SENSOR_COLS) + extra
     rows = (
-        {col: getattr(row, col) for col in cols}
-        for row in df.itertuples(index=False)
+        {col: getattr(row, col) for col in cols} for row in df.itertuples(index=False)
     )
     return rows, adc_max

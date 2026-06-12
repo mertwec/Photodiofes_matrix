@@ -57,8 +57,9 @@ def log_to_csv(input_log: Path, output_csv: Path) -> int:
     """
     input_log, output_csv = Path(input_log), Path(output_csv)
     written = 0
-    with open(input_log, "r", errors="replace") as f_in, \
-            open(output_csv, "w", newline="") as f_out:
+    with open(input_log, "r", errors="replace") as f_in, open(
+        output_csv, "w", newline=""
+    ) as f_out:
         writer = csv.writer(f_out)
         writer.writerow(cfg.COLUMNS)  # T,s1,s2,s3,s4,v_x,v_y
 
@@ -93,6 +94,7 @@ def log_to_csv(input_log: Path, output_csv: Path) -> int:
 
     return written
 
+
 def format_duration_hms(t) -> str | None:
     """
     Время кадра из T в формате H:M:S.
@@ -110,3 +112,7 @@ def format_duration_hms(t) -> str | None:
     h, rem = divmod(total_s, 3600)
     m, s = divmod(rem, 60)
     return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+def dms_to_deg(deg:float, minute:float = 0, seconds:float = 0):
+    return deg + minute/60 + seconds/3600

@@ -3,7 +3,7 @@
 
 Эксперимент А из AI_ANSWER.md (§4): измеряем разностный сигнал детектора в трёх
 положениях луча — центр (i0) и два крайних (i1 право, i2 лево) — и для каждого
-записываем угол поворотного столика. По известному смещению (угол × фокус FOV) и
+записываем угол поворотного столика. По известному смещению (угол × фокус FOC) и
 измеренному сигналу далее (офлайн) восстанавливается размер пятна `w = x / h⁻¹(D)`,
 где `D = x_norm` — нормированная разность право/лево.
 
@@ -49,8 +49,8 @@ def _read_metrics(row: dict, adc_max: float):
     b1, b2, b3, b4 = (max(0.0, adc_max - v) for v in s)
     P = b1 + b2 + b3 + b4
     if P > 0:
-        x_norm = (b4 + b3 - b1 - b2) / P   # право − лево  (= D)
-        y_norm = (b1 + b4 - b2 - b3) / P   # верх − низ
+        x_norm = (b4 + b3 - b1 - b2) / P  # право − лево  (= D)
+        y_norm = (b1 + b4 - b2 - b3) / P  # верх − низ
     else:
         x_norm = y_norm = 0.0
     fracs = quadrant_fracs(s, cfg.S_VAL_MAX, cfg.S_VAL_MIN) or (0.0,)
@@ -60,7 +60,7 @@ def _read_metrics(row: dict, adc_max: float):
 def _pos_ok(kind: str, x_norm: float, y_norm: float, sig: float) -> bool:
     """Достигнуто ли целевое положение для шага kind (с проверкой наличия луча)."""
     if sig < cfg.CALIB_MIN_FRAC:
-        return False                       # луча нет / слишком тускло
+        return False  # луча нет / слишком тускло
     if kind == "center":
         return abs(x_norm) < cfg.CALIB_CENTER_EPS and abs(y_norm) < cfg.CALIB_CENTER_EPS
     if kind == "right":
@@ -73,7 +73,11 @@ def _pos_ok(kind: str, x_norm: float, y_norm: float, sig: float) -> bool:
 def _ask_angle(title: str) -> float:
     """Запросить в терминале угол поворотного столика (град)."""
     while True:
-        ans = input(f"  Введите угол столика для «{title}» (град): ").strip().replace(",", ".")
+        ans = (
+            input(f"  Введите угол столика для «{title}» (град): ")
+            .strip()
+            .replace(",", ".")
+        )
         try:
             return float(ans)
         except ValueError:
@@ -92,11 +96,11 @@ def save_calibration(results: dict, out_dir: Path | str) -> Path:
     d = Path(out_dir)
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"CALIBRATE.json"
-    angles = {k: results[k]["angle"] for k in results}      # {"i0":0.0,"i1":2.0,"i2":-2.0}
+    angles = {k: results[k]["angle"] for k in results}  # {"i0":0.0,"i1":2.0,"i2":-2.0}
     payload = {
         "created": ts,
         "profile": "gauss_1e2",
-        "fov": cfg.FOV,
+        "fov": cfg.FOC,
         "angles": angles,
         "points": results,
     }
@@ -117,10 +121,15 @@ def _report_radius(results: dict) -> None:
     info = spot_radius_from_points(results)
     if info is None:
         return
-    pp = "   ".join(f"{k}: w={v['w_mm']} мм" for k, v in info["per_point"].items()
-                    if v["w_mm"] is not None)
-    print(f"  [w] текущая оценка: w = {info['w_mm']:.2f} мм "
-          f"(r = {info['radius_px']:.1f} px)   {pp}")
+    pp = "   ".join(
+        f"{k}: w={v['w_mm']} мм"
+        for k, v in info["per_point"].items()
+        if v["w_mm"] is not None
+    )
+    print(
+        f"  [w] текущая оценка: w = {info['w_mm']:.2f} мм "
+        f"(r = {info['radius_px']:.1f} px)   {pp}"
+    )
     for msg in info["warnings"]:
         print(f"  ⚠ {msg}")
 
@@ -149,7 +158,9 @@ def _run_step(rows, fig, point, hint_text, kind, adc_max, half, state):
         else:
             ok = _pos_ok(kind, x_norm, y_norm, sig)
             _set_point_color(point, "lime" if ok else "white")
-            hint_text.set_text(f"наведите, остановите столик и нажмите «w»   x={x_norm:+.3f}")
+            hint_text.set_text(
+                f"наведите, остановите столик и нажмите «w»   x={x_norm:+.3f}"
+            )
         fig.canvas.draw_idle()
         fig.canvas.flush_events()
         time.sleep(0.01)
@@ -162,19 +173,27 @@ def _run_step(rows, fig, point, hint_text, kind, adc_max, half, state):
             # слабый сигнал — луч не на датчике.
             spread = max(r[1] for r in buf) - min(r[1] for r in buf)
             if spread > 0.02:
-                print(f"  ⚠ D дрейфовал во время захвата (размах {spread:.3f}) — "
-                      "столик двигался? Точку стоит переснять.")
+                print(
+                    f"  ⚠ D дрейфовал во время захвата (размах {spread:.3f}) — "
+                    "столик двигался? Точку стоит переснять."
+                )
             if max(r[3] for r in buf) < cfg.CALIB_MIN_FRAC:
                 print("  ⚠ слабый сигнал во время захвата — луч на датчике?")
             hint_text.set_text("ЗАФИКСИРОВАНО — введите угол в терминале")
             fig.canvas.draw_idle()
             fig.canvas.flush_events()
-            return {"s": s_avg, "x_norm": round(x_avg, 4),
-                    "P": round(P_avg, 1), "n": len(buf)}
+            return {
+                "s": s_avg,
+                "x_norm": round(x_avg, 4),
+                "P": round(P_avg, 1),
+                "n": len(buf),
+            }
     return None
 
 
-def run_calibration(rows, adc_max: float, size: int, out_dir: Path | str) -> Path | None:
+def run_calibration(
+    rows, adc_max: float, size: int, out_dir: Path | str
+) -> Path | None:
     """
     Провести интерактивную калибровку (3 шага) и сохранить JSON.
 
@@ -199,8 +218,12 @@ def run_calibration(rows, adc_max: float, size: int, out_dir: Path | str) -> Pat
     ax.axvline(+cfg.CALIB_SIDE_EPS * half, color="gray", linestyle=":", linewidth=1)
     ax.axvline(-cfg.CALIB_SIDE_EPS * half, color="gray", linestyle=":", linewidth=1)
 
-    title_text = ax.text(0, lim - 8, "", color="white", fontsize=12, ha="center", va="top")
-    hint_text = ax.text(0, -lim + 8, "", color="lightgray", fontsize=10, ha="center", va="bottom")
+    title_text = ax.text(
+        0, lim - 8, "", color="white", fontsize=12, ha="center", va="top"
+    )
+    hint_text = ax.text(
+        0, -lim + 8, "", color="lightgray", fontsize=10, ha="center", va="bottom"
+    )
     (point,) = ax.plot([0], [0], "o", markersize=12, color="white", zorder=5)
 
     state = {"running": True}
@@ -216,8 +239,10 @@ def run_calibration(rows, adc_max: float, size: int, out_dir: Path | str) -> Pat
     results: dict = {}
     try:
         for key, title, kind in _STEPS:
-            print(f"\n[Калибровка] Шаг {key}: наведите луч — «{title}», "
-                  f"остановите столик и нажмите «w». (q — отмена)")
+            print(
+                f"\n[Калибровка] Шаг {key}: наведите луч — «{title}», "
+                f"остановите столик и нажмите «w». (q — отмена)"
+            )
             title_text.set_text(f"Сканирование {key}: {title}")
             rec = _run_step(rows, fig, point, hint_text, kind, adc_max, half, state)
             if rec is None:
@@ -225,7 +250,9 @@ def run_calibration(rows, adc_max: float, size: int, out_dir: Path | str) -> Pat
                 return None
             rec["angle"] = _ask_angle(title)
             results[key] = rec
-            print(f"  ✓ {key}: угол={rec['angle']}  x_norm={rec['x_norm']:+.3f}  s={rec['s']}")
+            print(
+                f"  ✓ {key}: угол={rec['angle']}  x_norm={rec['x_norm']:+.3f}  s={rec['s']}"
+            )
             _report_radius(results)
     finally:
         plt.ioff()

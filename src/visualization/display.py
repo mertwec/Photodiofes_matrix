@@ -39,21 +39,36 @@ def display_points_stream(
     ax.axhline(0, color="green", linestyle="--", linewidth=1)
 
     status_text = ax.text(
-        -half + 5, half - 10,
+        -half + 5,
+        half - 10,
         "No Light Detected",
-        color="red", fontsize=10, visible=False,
+        color="red",
+        fontsize=10,
+        visible=False,
     )
     point_label = ax.text(
-        0, 0, "",
-        color="white", fontsize=8, ha="left", va="bottom", visible=False,
+        0,
+        0,
+        "",
+        color="white",
+        fontsize=8,
+        ha="left",
+        va="bottom",
+        visible=False,
     )
     (line,) = ax.plot([], [], "wo", markersize=6, zorder=4)
 
     # Окружность размера пятна (обновляется покадрово)
     spot_circle = Circle(
-        (0, 0), 0.0,
-        fill=True, facecolor="gold", edgecolor="yellow",
-        alpha=0.18, linewidth=1.5, zorder=3, visible=False,
+        (0, 0),
+        0.0,
+        fill=True,
+        facecolor="gold",
+        edgecolor="yellow",
+        alpha=0.18,
+        linewidth=1.5,
+        zorder=3,
+        visible=False,
     )
     ax.add_patch(spot_circle)
 
@@ -61,41 +76,76 @@ def display_points_stream(
     if legend:
         legend_text = "  |  ".join(f"{k}: {v}" for k, v in legend.items())
         ax.text(
-            -half + 5, -half + 5, legend_text,
-            color="lightgray", fontsize=8, ha="left", va="bottom",
+            -half + 5,
+            -half + 5,
+            legend_text,
+            color="lightgray",
+            fontsize=8,
+            ha="left",
+            va="bottom",
         )
 
     # Живой референс v_x, v_y — снизу справа
     v_text = ax.text(
-        half - 5, -half + 5, "",
-        color="cyan", fontsize=9, ha="right", va="bottom", visible=False,
+        half - 5,
+        -half + 5,
+        "",
+        color="cyan",
+        fontsize=9,
+        ha="right",
+        va="bottom",
+        visible=False,
     )
 
     # Живое время кадра ts (из T, формат H:M:S) — сверху справа
     ts_text = ax.text(
-        half - 5, half - 10, "",
-        color="lightgray", fontsize=9, ha="right", va="top", visible=False,
+        half - 5,
+        half - 10,
+        "",
+        color="lightgray",
+        fontsize=9,
+        ha="right",
+        va="top",
+        visible=False,
     )
 
     # Живой радиус пятна в мм относительно зоны датчика (DET_SIZE_MM) — сверху слева.
     # Работает и для калибровки (постоянный радиус), и для потокового расчёта:
     # обе ветки кладут радиус в Frame.radius (px), здесь переводим px → мм.
     r_text = ax.text(
-        -half + 5, half - 10, "",
-        color="gold", fontsize=9, ha="left", va="top", visible=False,
+        -half + 5,
+        half - 10,
+        "",
+        color="gold",
+        fontsize=9,
+        ha="left",
+        va="top",
+        visible=False,
     )
 
     # Углы отклонения центра по x/y (из фокуса и радиуса пятна) — сверху слева,
     # под строкой радиуса.
     ang_text = ax.text(
-        -half + 5, half - 24, "",
-        color="lightgreen", fontsize=9, ha="left", va="top", visible=False,
+        -half + 5,
+        half - 24,
+        "",
+        color="lightgreen",
+        fontsize=9,
+        ha="left",
+        va="top",
+        visible=False,
     )
 
     # Разностный сигнал D (право−лево, = x_norm) — сверху слева, под углами.
     d_text = ax.text(
-        -half + 5, half - 38, "",
-        color="gold", fontsize=9, ha="left", va="top", visible=False,
+        -half + 5,
+        half - 38,
+        "",
+        color="gold",
+        fontsize=9,
+        ha="left",
+        va="top",
+        visible=False,
     )
 
     state = {"running": True}
@@ -173,9 +223,7 @@ def display_points_stream(
             ang_text.set_color("yellow")
             ang_text.set_visible(True)
         elif frame.angle_x is not None and frame.angle_y is not None:
-            ang_text.set_text(
-                f"θx={frame.angle_x:+.2f}°   θy={frame.angle_y:+.2f}°"
-            )
+            ang_text.set_text(f"θx={frame.angle_x:+.2f}°   θy={frame.angle_y:+.2f}°")
             ang_text.set_color("lightgreen")
             ang_text.set_visible(True)
         else:

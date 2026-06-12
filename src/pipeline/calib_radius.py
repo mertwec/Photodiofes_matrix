@@ -14,7 +14,7 @@
     erfinv(D_i) − erfinv(D_j) = √2 · (x_i − x_j) / w
     ⇒   w = √2 · (x_i − x_j) / (erfinv(D_i) − erfinv(D_j))
 
-где x_i = FOV · tan(CALIB_ANGLE_SCALE · Δθ_i), а Δθ_i = θ_i − θ_{i0} — угол
+где x_i = FOC · tan(CALIB_ANGLE_SCALE · Δθ_i), а Δθ_i = θ_i − θ_{i0} — угол
 относительно ЦЕНТРАЛЬНОЙ точки. В разности смещение нуля (луч в i0 не точно на
 границе) сокращается точно — в отличие от вычитания в D-пространстве, которое
 искажается нелинейностью erf.
@@ -64,7 +64,7 @@ def spot_radius_from_points(pts: dict) -> dict | None:
     :return: dict {radius_px, w_mm, per_point, warnings} либо None, если годных
              точек для хотя бы одной пары нет.
     """
-    fov = float(cfg.FOV)                   # мм
+    fov = float(cfg.FOC)  # мм
     warnings: list[str] = []
 
     p0 = pts.get("i0") or {}
@@ -78,7 +78,9 @@ def spot_radius_from_points(pts: dict) -> dict | None:
             continue
         D = float(p["x_norm"])
         if abs(D) >= _D_MAX:
-            warnings.append(f"{key}: |D|={abs(D):.3f} в насыщении (≥{_D_MAX}) — точка пропущена")
+            warnings.append(
+                f"{key}: |D|={abs(D):.3f} в насыщении (≥{_D_MAX}) — точка пропущена"
+            )
             continue
         if key == "i0":
             points.append((key, D, 0.0))
@@ -86,11 +88,15 @@ def spot_radius_from_points(pts: dict) -> dict | None:
         dtheta = normalize_deg(float(p["angle"])) - theta0
         # Валидация знаков вместо abs() (§9.5): право — положительные D и Δθ.
         if (D - d0) * dtheta < 0:
-            warnings.append(f"{key}: знак D={D:+.3f} не согласован со знаком "
-                            f"Δθ={dtheta:+.2f}° — проверьте раскладку ph↔s / знак столика")
+            warnings.append(
+                f"{key}: знак D={D:+.3f} не согласован со знаком "
+                f"Δθ={dtheta:+.2f}° — проверьте раскладку ph↔s / знак столика"
+            )
         if abs(D) < cfg.CALIB_SIDE_EPS + 0.02:
-            warnings.append(f"{key}: D={D:+.3f} близко к порогу фиксации "
-                            f"({cfg.CALIB_SIDE_EPS}) — точка могла быть снята не в крайнем положении")
+            warnings.append(
+                f"{key}: D={D:+.3f} близко к порогу фиксации "
+                f"({cfg.CALIB_SIDE_EPS}) — точка могла быть снята не в крайнем положении"
+            )
         points.append((key, D, fov * math.tan(math.radians(dtheta))))
 
     sides = [p for p in points if p[0] != "i0"]
@@ -117,18 +123,29 @@ def spot_radius_from_points(pts: dict) -> dict | None:
     diag = list(est)
     for sp in sides:
         w = _w_pair(sp, center) if center is not None else None
-        per_point[sp[0]] = {"D": round(sp[1], 4), "x_mm": round(sp[2], 3),
-                            "w_mm": round(w, 3) if w is not None else None}
+        per_point[sp[0]] = {
+            "D": round(sp[1], 4),
+            "x_mm": round(sp[2], 3),
+            "w_mm": round(w, 3) if w is not None else None,
+        }
         if w is not None:
             diag.append(w)
     if abs(d0) > 0.1:
-        warnings.append(f"центр смещён: D(i0)={d0:+.3f} — луч в i0 заметно не на границе")
+        warnings.append(
+            f"центр смещён: D(i0)={d0:+.3f} — луч в i0 заметно не на границе"
+        )
     if len(diag) > 1 and max(diag) > 1.2 * min(diag):
-        warnings.append(f"разброс оценок w: {min(diag):.2f}…{max(diag):.2f} мм (>20%) — "
-                        "несимметричные точки или фоновая засветка")
+        warnings.append(
+            f"разброс оценок w: {min(diag):.2f}…{max(diag):.2f} мм (>20%) — "
+            "несимметричные точки или фоновая засветка"
+        )
 
-    return {"radius_px": w_mm * cfg.CALIB_PX_PER_MM, "w_mm": w_mm,
-            "per_point": per_point, "warnings": warnings}
+    return {
+        "radius_px": w_mm * cfg.CALIB_PX_PER_MM,
+        "w_mm": w_mm,
+        "per_point": per_point,
+        "warnings": warnings,
+    }
 
 
 def spot_radius_from_calib(calib_path: Path | str) -> dict | None:

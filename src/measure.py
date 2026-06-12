@@ -40,8 +40,8 @@ def _read_point(row: dict, half: float) -> tuple[tuple[float, ...], float, float
     b1, b2, b3, b4 = (max(0.0, cfg.ADC_MAX - v) for v in s)
     P = b1 + b2 + b3 + b4
     if P > 0:
-        x_norm = (b4 + b3 - b1 - b2) / P   # право − лево
-        y_norm = (b1 + b4 - b2 - b3) / P   # верх − низ
+        x_norm = (b4 + b3 - b1 - b2) / P  # право − лево
+        y_norm = (b1 + b4 - b2 - b3) / P  # верх − низ
     else:
         x_norm = y_norm = 0.0
     return s, x_norm * half, y_norm * half
@@ -68,7 +68,7 @@ def save_measure(points: dict, out_dir: Path | str) -> Path:
     d = Path(out_dir)
     d.mkdir(parents=True, exist_ok=True)
     path = d / "MEASURE.json"
-    payload = {"created": ts, "fov": cfg.FOV, "points": points}
+    payload = {"created": ts, "fov": cfg.FOC, "points": points}
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
 
@@ -102,13 +102,21 @@ def run_measure(rows, size: int, out_dir: Path | str) -> None:
     ax.set_aspect("equal", adjustable="box")
     ax.axvline(0, color="green", linestyle="--", linewidth=1)
     ax.axhline(0, color="green", linestyle="--", linewidth=1)
-    ax.text(0, lim - 4, "measure   w: фиксация   s: сохранить   q: выход",
-            color="white", fontsize=10, ha="center", va="top")
-    info = ax.text(-lim + 4, -lim + 4, "", color="lightgray", fontsize=9,
-                   ha="left", va="bottom")
+    ax.text(
+        0,
+        lim - 4,
+        "measure   w: фиксация   s: сохранить   q: выход",
+        color="white",
+        fontsize=10,
+        ha="center",
+        va="top",
+    )
+    info = ax.text(
+        -lim + 4, -lim + 4, "", color="lightgray", fontsize=9, ha="left", va="bottom"
+    )
     (point,) = ax.plot([0], [0], "o", markersize=8, color="white", zorder=5)
 
-    latest: list = []   # сырые s1..s4 последнего пришедшего кадра
+    latest: list = []  # сырые s1..s4 последнего пришедшего кадра
     points: dict = {}
     lock = threading.Lock()
     state = {"running": True, "capturing": False, "msg": "ожидание данных…"}
@@ -160,7 +168,7 @@ def run_measure(rows, size: int, out_dir: Path | str) -> None:
             if not state["running"] or not plt.fignum_exists(fig.number):
                 break
             s, x_px, y_px = _read_point(row, half)
-            latest = s   # запоминаем последний кадр для фиксации по «w»
+            latest = s  # запоминаем последний кадр для фиксации по «w»
             point.set_data([x_px], [y_px])
             # Во время ввода углов точка зелёная — индикатор, что кадр зафиксирован.
             _set_point_color(point, "lime" if state["capturing"] else "white")

@@ -15,7 +15,7 @@ from src.visualization.display import display_points_stream
 DEFAULT_FILE = Path("./DATA/putty.csv")
 
 
-def _calib_radius(calib_file = cfg.CALIB_FILE) -> float | None:
+def _calib_radius(calib_file=cfg.CALIB_FILE) -> float | None:
     """
     Постоянный радиус пятна из калибровки (Задача №5) или None, если калибровки нет.
 
@@ -24,10 +24,14 @@ def _calib_radius(calib_file = cfg.CALIB_FILE) -> float | None:
     """
     info = spot_radius_from_calib(calib_file)
     if info is None:
-        print("[Радиус] Калибровка не найдена — радиус считается покадрово по квадрантам.")
+        print(
+            "[Радиус] Калибровка не найдена — радиус считается покадрово по квадрантам."
+        )
         return None
-    print(f"[Радиус] Постоянный радиус из калибровки: {info['radius_px']:.1f} px "
-          f"(w≈{info['w_mm']:.2f} мм). Файл: {calib_file}")
+    print(
+        f"[Радиус] Постоянный радиус из калибровки: {info['radius_px']:.1f} px "
+        f"(w≈{info['w_mm']:.2f} мм). Файл: {calib_file}"
+    )
     for msg in info.get("warnings", []):
         print(f"[Радиус] ⚠ {msg}")
     return info["radius_px"]
@@ -40,22 +44,32 @@ def cli():
 
 @cli.command("log")
 @click.option(
-    "--file", "file_path",
+    "--file",
+    "file_path",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=DEFAULT_FILE, show_default=True,
+    default=DEFAULT_FILE,
+    show_default=True,
     help="CSV-лог с показаниями датчиков.",
 )
-@click.option("--size", default=cfg.SIZE_DISPLAY, show_default=True,
-              help="Размер дисплея в пикселях.")
+@click.option(
+    "--size",
+    default=cfg.SIZE_DISPLAY,
+    show_default=True,
+    help="Размер дисплея в пикселях.",
+)
 def log_cmd(file_path: Path, size: int):
     """Проиграть точки из CSV-лога."""
     df = read_csv_log(file_path)
     rows, adc_max = df_to_raw_rows(df)
 
-    frames = make_point(rows, size, adc_max,
-                        val_max=cfg.S_VAL_MAX, val_min=cfg.S_VAL_MIN,
-                        fixed_radius= _calib_radius()
-                        )
+    frames = make_point(
+        rows,
+        size,
+        adc_max,
+        val_max=cfg.S_VAL_MAX,
+        val_min=cfg.S_VAL_MIN,
+        fixed_radius=_calib_radius(),
+    )
     # ts (время из T) рисуется живой подписью покадрово, см. Frame.ts / display.
     legend: dict = {
         "frames": len(df),
@@ -63,14 +77,20 @@ def log_cmd(file_path: Path, size: int):
         # "s_max/min": f"{cfg.S_VAL_MAX}/{cfg.S_VAL_MIN}",
         # "quit": "q",
     }
-    display_points_stream(frames, size=size, interval= cfg.INTERVAL, legend=legend)
+    display_points_stream(frames, size=size, interval=cfg.INTERVAL, legend=legend)
 
 
 @cli.command("stream")
 @click.option("--port", default=cfg.PORT, show_default=True, help="UART-порт.")
-@click.option("--baudrate", default=cfg.BAUDRATE, show_default=True, help="Скорость UART.")
-@click.option("--log/--no-log", default=True, show_default=True,
-              help="Сохранять принятые валидные строки в LOG_{timestamp}.csv.")
+@click.option(
+    "--baudrate", default=cfg.BAUDRATE, show_default=True, help="Скорость UART."
+)
+@click.option(
+    "--log/--no-log",
+    default=True,
+    show_default=True,
+    help="Сохранять принятые валидные строки в LOG_{timestamp}.csv.",
+)
 def stream_cmd(port: str, baudrate: int, log: bool):
     """Читать данные с UART и отображать в реальном времени."""
     adc_max = cfg.ADC_MAX
@@ -84,10 +104,14 @@ def stream_cmd(port: str, baudrate: int, log: bool):
     try:
         # Задача №5: если есть калибровка — радиус пятна постоянный (из
         # нож-сканирования); иначе считается покадрово по квадрантам (Поправка №1).
-        frames = make_point(rows, size, adc_max,
-                            val_max=cfg.S_VAL_MAX, val_min=cfg.S_VAL_MIN,
-                            fixed_radius=_calib_radius()
-                            )
+        frames = make_point(
+            rows,
+            size,
+            adc_max,
+            val_max=cfg.S_VAL_MAX,
+            val_min=cfg.S_VAL_MIN,
+            fixed_radius=_calib_radius(),
+        )
 
         legend: dict = {
             "port": port,
@@ -102,23 +126,25 @@ def stream_cmd(port: str, baudrate: int, log: bool):
 
 @cli.command("calibr")
 @click.option("--port", default=cfg.PORT, show_default=True, help="UART-порт.")
-@click.option("--baudrate", default=cfg.BAUDRATE, show_default=True, help="Скорость UART.")
+@click.option(
+    "--baudrate", default=cfg.BAUDRATE, show_default=True, help="Скорость UART."
+)
 def calibr_cmd(port: str, baudrate: int):
     """Калибровка нож-сканированием (Задача №4): 3 фиксации → CALIB_*.json."""
     # 3 фиксации (центр + крайнее право/лево): записываем углы столика и сигналы
     # в CALIBRATE.json. q/закрытие окна — отмена.
     rows = read_serial_rows(port=port, baudrate=baudrate)
     try:
-        run_calibration(rows, cfg.ADC_MAX,
-                        size = cfg.SIZE_DISPLAY,
-                        out_dir = cfg.CALIB_DIR)
+        run_calibration(rows, cfg.ADC_MAX, size=cfg.SIZE_DISPLAY, out_dir=cfg.CALIB_DIR)
     finally:
         rows.close()  # освобождаем COM-порт
 
 
 @cli.command("measure")
 @click.option("--port", default=cfg.PORT, show_default=True, help="UART-порт.")
-@click.option("--baudrate", default=cfg.BAUDRATE, show_default=True, help="Скорость UART.")
+@click.option(
+    "--baudrate", default=cfg.BAUDRATE, show_default=True, help="Скорость UART."
+)
 @click.option("--test/--no-test", default=False, show_default=False, help="Test by log")
 def measure_cmd(port: str, baudrate: int, test: bool):
     """Режим фиксации данных (Задача №7): w — зафиксировать точку, s — сохранить JSON."""

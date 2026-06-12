@@ -27,13 +27,26 @@ from scipy.optimize import minimize
 from config import cfg
 
 # Сетка многостарта (PDF, стр. 8): 9 позиций × 4 радиуса + аналитический старт.
-_SXY = ((0.0, 0.0), (0.7, 0.7), (-0.7, 0.7), (-0.7, -0.7), (0.7, -0.7),
-        (1.2, 0.0), (0.0, 1.2), (-1.2, 0.0), (0.0, -1.2))
+_SXY = (
+    (0.0, 0.0),
+    (0.7, 0.7),
+    (-0.7, 0.7),
+    (-0.7, -0.7),
+    (0.7, -0.7),
+    (1.2, 0.0),
+    (0.0, 1.2),
+    (-1.2, 0.0),
+    (0.0, -1.2),
+)
 _SR2 = (0.3, 0.5, 0.7, 0.9)
 
 
 def forward_areas(
-    x: float, y: float, R2: float, R1: float = 1.0, N: int | None = None,
+    x: float,
+    y: float,
+    R2: float,
+    R1: float = 1.0,
+    N: int | None = None,
 ) -> np.ndarray:
     """
     Прямая задача: площади пересечения круга (x, y, R2) с 4 квадрантами круга R1.
@@ -51,13 +64,13 @@ def forward_areas(
     y_lo = max(y - R2, -R1)
     y_hi = min(y + R2, R1)
     if y_hi <= y_lo:
-        return A                                        # нет пересечения по вертикали
+        return A  # нет пересечения по вертикали
 
     h = (y_hi - y_lo) / N
-    yy = y_lo + (np.arange(N) + 0.5) * h                # середины полос
-    aa = np.sqrt(np.clip(R1 * R1 - yy * yy, 0.0, None)) # полуширина детектора C1
+    yy = y_lo + (np.arange(N) + 0.5) * h  # середины полос
+    aa = np.sqrt(np.clip(R1 * R1 - yy * yy, 0.0, None))  # полуширина детектора C1
     d2 = R2 * R2 - (yy - y) ** 2
-    b = np.sqrt(np.clip(d2, 0.0, None))                 # полуширина пятна C2
+    b = np.sqrt(np.clip(d2, 0.0, None))  # полуширина пятна C2
     xL = np.maximum(x - b, -aa)
     xR = np.minimum(x + b, aa)
     seg = (d2 > 0.0) & (xR > xL)
@@ -84,14 +97,15 @@ def _make_residual(A_meas: np.ndarray):
     def F(p) -> float:
         x, y, R2 = p
         if not (lo < R2 <= hi):
-            return 1e6                                  # вне допустимого диапазона
+            return 1e6  # вне допустимого диапазона
         return float(np.sum((forward_areas(x, y, R2) - A_meas) ** 2))
 
     return F
 
 
 def solve_xyr2(
-    A_meas, warm: tuple[float, float, float] | None = None,
+    A_meas,
+    warm: tuple[float, float, float] | None = None,
 ) -> tuple[float, float, float, float]:
     """
     Обратная задача: по 4 площадям [A_Q1, A_Q2, A_Q3, A_Q4] найти (x, y, R2).
@@ -119,18 +133,19 @@ def solve_xyr2(
     # Аналитическое приближение (PDF, стр. 7) + сетка многостарта (стр. 8).
     A1, A2, A3, A4 = A_meas
     A_tot = float(A_meas.sum())
-    r2_0 = (min(0.95, max(0.05, 1.2 * math.sqrt(A_tot / math.pi)))
-            if A_tot > 0 else 0.5)
-    p0 = [1.5 * ((A1 + A4) - (A2 + A3)),    # x0: право − лево
-          1.5 * ((A1 + A2) - (A3 + A4)),    # y0: верх − низ
-          r2_0]
+    r2_0 = min(0.95, max(0.05, 1.2 * math.sqrt(A_tot / math.pi))) if A_tot > 0 else 0.5
+    p0 = [
+        1.5 * ((A1 + A4) - (A2 + A3)),  # x0: право − лево
+        1.5 * ((A1 + A2) - (A3 + A4)),  # y0: верх − низ
+        r2_0,
+    ]
     starts = [p0] + [[sx, sy, sr] for sx, sy in _SXY for sr in _SR2]
 
     for s in starts:
         r = minimize(F, s, method="Nelder-Mead", options=opts)
         if best is None or r.fun < best.fun:
             best = r
-        if best.fun < cfg.NM_FATOL:                     # глобальный минимум найден
+        if best.fun < cfg.NM_FATOL:  # глобальный минимум найден
             break
 
     # Финальное доуточнение из лучшего старта малым симплексом.

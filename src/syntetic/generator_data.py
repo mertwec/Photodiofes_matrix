@@ -2,10 +2,10 @@ import random
 from pprint import pprint
 
 
-def generate_random_data(dimension:int = 2) -> list[list[float]]:
+def generate_random_data(dimension: int = 2) -> list[list[float]]:
     """
     generates a random matrix of photodiodes with values 0 or 1.
-    
+
     param:
     dimension (int): Dimension of the photodiodes matrix (2x2 or 4x4).
 
