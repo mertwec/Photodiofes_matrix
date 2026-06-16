@@ -6,37 +6,12 @@ import click
 from config import cfg
 from src.calibration import run_calibration
 from src.measure import run_measure
-from src.pipeline.calib_radius import spot_radius_from_calib
+from src.pipeline.calib_radius import info_calib_radius
 from src.pipeline.get_single_point import df_to_raw_rows, make_point
 from src.reader.file_reader import read_csv_log
 from src.reader.log_writer import make_log_path, tee_to_csv
 from src.reader.stream_reader import read_serial_rows
 from src.visualization.display import display_points_stream
-
-DEFAULT_FILE = Path("./DATA/putty.csv")
-
-
-def _calib_radius(calib_file=cfg.CALIB_FILE) -> float | None:
-    """
-    Постоянный радиус пятна из калибровки (Задача №5) или None, если калибровки нет.
-
-    Радиус берётся ТОЛЬКО из калибровки (нож-сканирование): без CALIBRATE.json
-    круг пятна не отображается — рисуется только точка.
-    """
-    info = spot_radius_from_calib(calib_file)
-    if info is None:
-        print(
-            "[Радиус] Калибровка не найдена — круг пятна не отображается "
-            "(только точка)."
-        )
-        return None
-    print(
-        f"[Радиус] Постоянный радиус из калибровки: {info['radius_px']:.1f} px "
-        f"(w≈{info['w_mm']:.2f} мм). Файл: {calib_file}"
-    )
-    for msg in info.get("warnings", []):
-        print(f"[Радиус] ⚠ {msg}")
-    return info["radius_px"]
 
 
 @click.group()
@@ -49,7 +24,7 @@ def cli():
     "--file",
     "file_path",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=DEFAULT_FILE,
+    default=Path("./DATA/putty.csv"),
     show_default=True,
     help="CSV-лог с показаниями датчиков.",
 )
@@ -70,7 +45,7 @@ def log_cmd(file_path: Path, size: int):
         adc_max,
         val_max=cfg.S_VAL_MAX,
         val_min=cfg.S_VAL_MIN,
-        fixed_radius=_calib_radius(),
+        fixed_radius=info_calib_radius(),
     )
     # ts (время из T) рисуется живой подписью покадрово, см. Frame.ts / display.
     legend: dict = {
@@ -112,7 +87,7 @@ def stream_cmd(port: str, baudrate: int, log: bool):
             adc_max,
             val_max=cfg.S_VAL_MAX,
             val_min=cfg.S_VAL_MIN,
-            fixed_radius=_calib_radius(),
+            fixed_radius=info_calib_radius(),
         )
 
         legend: dict = {

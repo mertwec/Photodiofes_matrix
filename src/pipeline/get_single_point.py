@@ -1,15 +1,10 @@
 """
 Docstring для get_angle
-photodiodes matrix in model:
+photodiodes matrix:
 
-ph1 | ph2
+ph1 | ph4
 ---------
-ph3 | ph4
-
-
-photodiodes matrix in real:
-s1 | s4
-s2 | s3
+ph2 | ph3
 
 ph = [0,1] # range value
 """
@@ -23,9 +18,6 @@ from scipy.special import erfinv
 from config import cfg
 from src.data_types import Frame, Point2D
 from src.utils.converter import format_duration_hms
-
-# |D| для устойчивой инверсии erfinv (у ±1 → ∞).
-_D_CLIP = 0.999
 
 
 def light_direction_to_point(matrix_pd: list[list[float]], size: int) -> Point2D | None:
@@ -78,7 +70,7 @@ def deflection_angles(
         return None, None
 
     def ang(d_norm: float) -> float:
-        d_norm = max(-_D_CLIP, min(_D_CLIP, d_norm))
+        d_norm = max(-cfg.D_MAX, min(cfg.D_MAX, d_norm))
         d_mm = w_mm * float(erfinv(d_norm)) / math.sqrt(2.0)  # смещение центра, мм
         return math.degrees(math.atan(d_mm / foc))
 
@@ -107,8 +99,8 @@ def quadrant_fracs(
 
 def make_point(
     rows: Iterable[dict],
-    size: int,
-    adc_max: float,
+    size: int = cfg.SIZE_DISPLAY,
+    adc_max: float = cfg.ADC_MAX,
     val_max: float | None = None,
     val_min: float | None = None,
     fixed_radius: float | None = None,
@@ -134,10 +126,9 @@ def make_point(
     засветки квадрантов (quadrant_fracs) и число засвеченных nz. Если не заданы —
     детекция потери позиции отключена.
 
-    fixed_radius (Задача №5) — ЕДИНСТВЕННЫЙ источник радиуса пятна: постоянный,
+    fixed_radius (Задача №5) — источник радиуса пятна: постоянный,
     из калибровки (calib_radius.spot_radius_from_calib по CALIBRATE.json), одинаков
-    для всех кадров с сигналом. Покадровый расчёт радиуса по соотношению засветки
-    квадрантов (геометрический решатель / top-hat) полностью убран: без калибровки
+    для всех кадров с сигналом. Без калибровки
     radius=None — рисуется только точка, без круга (и без углов отклонения,
     т.к. для них нужен w).
 

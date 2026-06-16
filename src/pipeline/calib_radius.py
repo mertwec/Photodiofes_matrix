@@ -39,17 +39,12 @@ from scipy.special import erfinv
 from config import cfg
 from src.utils.normalization import normalize_deg
 
-# |D| ближе к 1 — насыщение: erfinv → ∞, точка непригодна.
-_D_MAX = 0.999
-# Мин. |erfinv(D_i) − erfinv(D_j)| для устойчивого деления (точки слиплись).
-_EI_MIN = 1e-2
-
 
 def _w_pair(a: tuple[str, float, float], b: tuple[str, float, float]) -> float | None:
     """w по паре точек (key, D, x_мм); None — пара вырождена или знак не сходится."""
     (_, da, xa), (_, db, xb) = a, b
     de = float(erfinv(da)) - float(erfinv(db))
-    if abs(de) < _EI_MIN:
+    if abs(de) < cfg.EI_D_MIN:
         return None
     w = math.sqrt(2.0) * (xa - xb) / de
     return w if w > 0 else None
@@ -78,9 +73,9 @@ def spot_radius_from_points(pts: dict) -> dict | None:
         if "angle" not in p or "x_norm" not in p:
             continue
         D = float(p["x_norm"])
-        if abs(D) >= _D_MAX:
+        if abs(D) >= cfg.D_MAX:
             warnings.append(
-                f"{key}: |D|={abs(D):.3f} в насыщении (≥{_D_MAX}) — точка пропущена"
+                f"{key}: |D|={abs(D):.3f} в насыщении (≥{cfg.D_MAX}) — точка пропущена"
             )
             continue
         if key == "i0":
@@ -160,3 +155,25 @@ def spot_radius_from_calib(calib_path: Path | str) -> dict | None:
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
     return spot_radius_from_points(data.get("points", {}))
+
+def info_calib_radius(calib_file=cfg.CALIB_FILE) -> float | None:
+    """
+    Постоянный радиус пятна из калибровки (Задача №5) или None, если калибровки нет.
+
+    Радиус берётся ТОЛЬКО из калибровки (нож-сканирование): без CALIBRATE.json
+    круг пятна не отображается — рисуется только точка.
+    """
+    info = spot_radius_from_calib(calib_file)
+    if info is None:
+        print(
+            "[Радиус] Калибровка не найдена — круг пятна не отображается "
+            "(только точка)."
+        )
+        return None
+    print(
+        f"[Радиус] Постоянный радиус из калибровки: {info['radius_px']:.1f} px "
+        f"(w≈{info['w_mm']:.2f} мм). Файл: {calib_file}"
+    )
+    for msg in info.get("warnings", []):
+        print(f"[Радиус] ⚠ {msg}")
+    return info["radius_px"]
