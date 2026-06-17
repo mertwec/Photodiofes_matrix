@@ -20,6 +20,7 @@ import ast
 import csv
 import re
 from pathlib import Path
+import json
 
 from config import cfg
 
@@ -116,3 +117,15 @@ def format_duration_hms(t) -> str | None:
 
 def dms_to_deg(deg:float, minute:float = 0, seconds:float = 0):
     return deg + minute/60 + seconds/3600
+
+
+def json_to_print_table(js_file:Path):
+    with open(js_file, "r") as f:
+        js_data = json.load(f)
+
+    print(f"| i\t\t | s1\t\t | s2\t\t | s3\t\t | s4\t\t | Th_x\t\t | Th_y\t\t")
+    print(f"| ---\t\t | ---\t\t | ---\t\t | ---\t\t | ---\t\t | ---\t\t | ---\t\t")
+    for i, v in js_data["points"].items():
+        print(f"|{i}\t\t | {v['s'][0]:10}\t | {v['s'][1]}\t | {v['s'][2]}\t | {v['s'][3]}\t | {v['angle_x']}\t\t | {v['angle_y']}\t |")
+
+

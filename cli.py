@@ -8,6 +8,7 @@ from src.calibration import run_calibration
 from src.measure import run_measure
 from src.pipeline.calib_radius import info_calib_radius
 from src.pipeline.get_single_point import df_to_raw_rows, make_point
+from src.pipeline.poly_compensation import load_compensation
 from src.reader.file_reader import read_csv_log
 from src.reader.log_writer import make_log_path, tee_to_csv
 from src.reader.stream_reader import read_serial_rows
@@ -17,6 +18,31 @@ from src.visualization.display import display_points_stream
 @click.group()
 def cli():
     """Визуализатор направления засветки с фотодиодной матрицы."""
+
+
+def _comp_model(comps: bool):
+    """Компенсационный полином углов (Задача №13) для make_point, если включён --comps.
+
+    Возвращает CompensationModel или None (нет файла / выключено) — тогда углы
+    считаются нож-моделью, как раньше. Печатает статус при старте.
+    """
+    if not comps:
+        print("[Компенсация] выключена (--no-comps): углы по нож-модели.")
+        return None
+    model = load_compensation()
+    if model is None:
+        print(
+            "[Компенсация] COMPENSATION.json не найден — углы по нож-модели "
+            "(построить: python cli_model.py fit)."
+        )
+        return None
+    loo = model.loo_rmse_deg or {}
+    tail = f", LOO≈{loo.get('x')}°/{loo.get('y')}°" if loo else ""
+    print(
+        f"[Компенсация] полином степени {model.degree} применён к углам "
+        f"(|D|≤{model.d_max}{tail})."
+    )
+    return model
 
 
 @cli.command("log")
@@ -34,7 +60,13 @@ def cli():
     show_default=True,
     help="Размер дисплея в пикселях.",
 )
-def log_cmd(file_path: Path, size: int):
+@click.option(
+    "--comps/--no-comps",
+    default=True,
+    show_default=True,
+    help="Применять компенсационный полином (Задача №13) к расчёту углов.",
+)
+def log_cmd(file_path: Path, size: int, comps: bool):
     """Проиграть точки из CSV-лога."""
     df = read_csv_log(file_path)
     rows, adc_max = df_to_raw_rows(df)
@@ -46,6 +78,7 @@ def log_cmd(file_path: Path, size: int):
         val_max=cfg.S_VAL_MAX,
         val_min=cfg.S_VAL_MIN,
         fixed_radius=info_calib_radius(),
+        comp_model=_comp_model(comps),
     )
     # ts (время из T) рисуется живой подписью покадрово, см. Frame.ts / display.
     legend: dict = {
@@ -68,7 +101,13 @@ def log_cmd(file_path: Path, size: int):
     show_default=True,
     help="Сохранять принятые валидные строки в LOG_{timestamp}.csv.",
 )
-def stream_cmd(port: str, baudrate: int, log: bool):
+@click.option(
+    "--comps/--no-comps",
+    default=True,
+    show_default=True,
+    help="Применять компенсационный полином (Задача №13) к расчёту углов.",
+)
+def stream_cmd(port: str, baudrate: int, log: bool, comps: bool):
     """Читать данные с UART и отображать в реальном времени."""
     adc_max = cfg.ADC_MAX
     size = cfg.SIZE_DISPLAY
@@ -80,7 +119,8 @@ def stream_cmd(port: str, baudrate: int, log: bool):
 
     try:
         # Задача №5: если есть калибровка — радиус пятна постоянный (из
-        # нож-сканирования); иначе считается покадрово по квадрантам (Поправка №1).
+        # нож-сканирования); иначе круг не рисуется. Углы: компенсационный полином
+        # (Задача №13) при --comps, иначе нож-модель (нужна калибровка).
         frames = make_point(
             rows,
             size,
@@ -88,6 +128,7 @@ def stream_cmd(port: str, baudrate: int, log: bool):
             val_max=cfg.S_VAL_MAX,
             val_min=cfg.S_VAL_MIN,
             fixed_radius=info_calib_radius(),
+            comp_model=_comp_model(comps),
         )
 
         legend: dict = {

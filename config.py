@@ -60,6 +60,25 @@ class CalibrateConfig:
     def CALIB_PX_PER_MM(self):
         return self.SIZE_DISPLAY / self.DET_SIZE_MM
 
+class CompensationConfig:
+    # --- Компенсационный полином (Задача №12/№13, DOCUMENTATION/AI_COMPENSATION.md) ---
+    # Корректирует систематику нож-модели: углы θx/θy считаются полиномом от
+    # u = erfinv(clip(D, ±COMP_DMAX)) — в этом базисе нож-модель почти линейна.
+    COMP_DEGREE = 2               # степень полинома (6 коэф/ось). Анализ §12: оптимум 2.
+    COMP_DMAX = 0.95              # |D| клампится сюда перед erfinv; точки |D|>DMAX
+    #                               (насыщение erf) в фит не берём и в рантайме не корректируем.
+    COMP_MAD_K = 3.0              # отбраковка выбросов: |остаток| > K·MAD (опечатки ввода углов).
+    COMP_MIN_POINTS_PER_COEF = 3  # мин. точек на коэффициент, иначе предупреждение.
+
+    @property
+    def MEASURE_FILE(self):
+        return self.MEASURE_DIR / "MEASURE.json"
+
+    @property
+    def COMP_FILE(self):
+        # Лежит рядом с источником (MEASURE.json), как CALIBRATE.json в DATA/CALIB.
+        return self.MEASURE_DIR / "COMPENSATION.json"
+
 
 class SensorConfig:
     # Опорный максимум АЦП: raw 0 — max засвет, ADC_MAX — min засвет (яркость 0).
@@ -90,7 +109,7 @@ class SensorConfig:
     NZ_ANGLE_MIN = 3
 
 
-class Config(SerialConfig, DisplayConfig, SensorConfig, CalibrateConfig):
+class Config(SerialConfig, DisplayConfig, SensorConfig, CalibrateConfig, CompensationConfig):
     pass
 
 

@@ -16,7 +16,7 @@ import pandas as pd
 from scipy.special import erfinv
 
 from config import cfg
-from src.data_types import Frame, Point2D
+from src.data_types import CompensationModel, Frame, Point2D
 from src.utils.converter import format_duration_hms
 
 
@@ -104,6 +104,7 @@ def make_point(
     val_max: float | None = None,
     val_min: float | None = None,
     fixed_radius: float | None = None,
+    comp_model: CompensationModel | None = None,
 ) -> Generator[Frame, None, None]:
     """
     Единый конвертер сырых строк датчиков в кадры Frame(point, v_x, v_y, radius).
@@ -132,6 +133,12 @@ def make_point(
     radius=None — рисуется только точка, без круга (и без углов отклонения,
     т.к. для них нужен w).
 
+    comp_model (Задача №13) — компенсационный полином углов. Если задан, в зоне
+    |x_norm|,|y_norm| ≤ comp_model.d_max углы берутся из него (compensation.predict
+    напрямую от x_norm/y_norm — радиус/w не нужны), а не из нож-модели. Вне зоны
+    валидности экстраполировать нельзя — откат на нож-модель (нужен radius). None —
+    углы только по нож-модели, как раньше.
+
     Потеря позиции (Задача №8): если сигнал пропал на ≥2 квадрантах
     (nz < cfg.NZ_ANGLE_MIN), угол измерить нельзя — кадр помечается lost=True,
     точка переносится на край дисплея по направлению последнего измеренного
@@ -140,6 +147,10 @@ def make_point(
     fracs_on = val_max is not None and val_min is not None
     half = size / 2
     last_dir: tuple[float, float] | None = None  # направление последнего измерения
+    # Задача №13: ленивый импорт predict — иначе цикл compensation→get_single_point.
+    comp_predict = None
+    if comp_model is not None:
+        from src.compensation import predict as comp_predict
     for row in rows:
         ts = format_duration_hms(row.get("T"))  # время кадра H:M:S из T (мс)
         s_raw = (row["s1"], row["s2"], row["s3"], row["s4"])  # для вывода на дисплей
@@ -213,10 +224,27 @@ def make_point(
         # CALIBRATE.json radius=None: рисуется только точка, без круга.
         radius = fixed_radius
 
-        # Углы отклонения центра по x/y из фокуса и радиуса пятна (нож-модель).
-        # Радиус в мм: вся зона датчика DET_SIZE_MM ↔ весь дисплей size.
+        # Углы отклонения центра по x/y.
         angle_x = angle_y = None
-        if radius is not None:
+        if comp_predict is not None:
+            # Задача №13: полином обучен на D при опорном cfg.ADC_MAX. В log-режиме
+            # adc_max = максимум лога и сместил бы шкалу D, поэтому для полинома D
+            # пересчитываем по cfg.ADC_MAX (в stream это тот же adc_max). Полином
+            # даёт угол напрямую из D — радиус/w не нужны.
+            cb1 = max(0.0, cfg.ADC_MAX - row["s1"])
+            cb2 = max(0.0, cfg.ADC_MAX - row["s2"])
+            cb3 = max(0.0, cfg.ADC_MAX - row["s3"])
+            cb4 = max(0.0, cfg.ADC_MAX - row["s4"])
+            cS = cb1 + cb2 + cb3 + cb4
+            if cS > 0:
+                xn = (cb4 + cb3 - cb1 - cb2) / cS  # право − лево
+                yn = (cb1 + cb4 - cb2 - cb3) / cS  # верх − низ
+                # Только в зоне валидности |D| ≤ d_max — вне неё не экстраполируем.
+                if abs(xn) <= comp_model.d_max and abs(yn) <= comp_model.d_max:
+                    angle_x, angle_y = comp_predict(comp_model, xn, yn)
+        if angle_x is None and radius is not None:
+            # Откат на нож-модель (Задача №5): без полинома или вне его зоны.
+            # Радиус пятна из калибровки → w в мм (зона датчика DET_SIZE_MM ↔ size).
             w_mm = radius * cfg.DET_SIZE_MM / size
             angle_x, angle_y = deflection_angles(x_norm, y_norm, w_mm, cfg.FOC)
 
