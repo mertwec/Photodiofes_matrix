@@ -19,6 +19,7 @@ class SerialConfig:
 class DisplayConfig:
     SIZE_DISPLAY = 140  # px
     INTERVAL = 0.1  # сек между кадрами (только для данных с лога)
+    MEASURE_HOLD = 3  # кадров усреднения после «w» в режиме measure (Задача №7)
     BASE_DIR = Path(os.path.dirname(__file__))
 
     @property

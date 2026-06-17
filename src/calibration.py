@@ -38,6 +38,15 @@ _STEPS = (
 )
 
 
+def average_s(samples: list) -> list[float]:
+    """Поканальное среднее списка кортежей s1..s4 (округление до 0.1 АЦП).
+
+    Общее усреднение захвата: используется и в калибровке (cfg.CALIB_HOLD кадров),
+    и в режиме measure (cfg.MEASURE_HOLD кадров, Задача №7).
+    """
+    return [round(sum(c) / len(c), 1) for c in zip(*samples)]
+
+
 def _read_metrics(row: dict, adc_max: float):
     """
     Строка датчиков → (s, x_norm, y_norm, P, sig).
@@ -167,8 +176,7 @@ def _run_step(rows, fig, point, hint_text, s_text, kind, adc_max, half, state):
         fig.canvas.flush_events()
         time.sleep(0.01)
         if len(buf) >= cfg.CALIB_HOLD:
-            ss = [r[0] for r in buf]
-            s_avg = [round(sum(c) / len(c), 1) for c in zip(*ss)]
+            s_avg = average_s([r[0] for r in buf])
             x_avg = sum(r[1] for r in buf) / len(buf)
             P_avg = sum(r[2] for r in buf) / len(buf)
             # Контроль качества захвата: дрейф D — столик ещё двигался;

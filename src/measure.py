@@ -4,13 +4,14 @@
 Поток данных отображается как в stream (live-точка направления засветки), но
 БЕЗ окружности пятна. Точки измерения фиксируются вручную с клавиатуры:
 
-  • «w» — зафиксировать значения квадрантов s1..s4 из кадра, пришедшего в
-    момент нажатия, и в ОТДЕЛЬНОМ потоке запросить в терминале углы по x и y
-    (input). Точка кладётся в словарь под ключом i0, i1, … (по порядку
-    нажатий) и, как только приняты ОБА угла, словарь сразу сохраняется в
-    DATA/MEASURE/MEASURE.json (автосохранение). После этого сбрасывается
-    входной буфер COM-порта (flush_event): пока оператор вводил углы, буфер
-    копился — дальше читаем то, что приходит сейчас, а не хвост буфера.
+  • «w» — усреднить значения квадрантов s1..s4 по следующим cfg.MEASURE_HOLD
+    кадрам (тем же average_s, что и калибровка) и в ОТДЕЛЬНОМ потоке запросить
+    в терминале углы по x и y (input). Точка кладётся в словарь под ключом
+    i0, i1, … (по порядку нажатий) и, как только приняты ОБА угла, словарь
+    сразу сохраняется в DATA/MEASURE/MEASURE.json (автосохранение). После
+    этого сбрасывается входной буфер COM-порта (flush_event): пока оператор
+    вводил углы, буфер копился — дальше читаем то, что приходит сейчас, а не
+    хвост буфера.
   • «s» — сохранить накопленный словарь вручную (дублирует автосохранение).
   • «q» — выход.
 
@@ -30,6 +31,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 from config import cfg
+from src.calibration import average_s
 from src.visualization.display import draw_quadrant_labels
 
 
@@ -142,9 +144,16 @@ def run_measure(
     (point,) = ax.plot([0], [0], "o", markersize=8, color="white", zorder=5)
 
     latest: list = []  # сырые s1..s4 последнего пришедшего кадра
+    accum: list = []   # буфер усреднения s1..s4 по cfg.MEASURE_HOLD кадрам после «w»
     points: dict = {}
     lock = threading.Lock()
-    state = {"running": True, "capturing": False, "msg": "ожидание данных…"}
+    # capturing — идёт ввод углов в терминале; pending — идёт усреднение кадров.
+    state = {
+        "running": True,
+        "capturing": False,
+        "pending": False,
+        "msg": "ожидание данных…",
+    }
 
     def _capture(s_vals: list[float]) -> None:
         """
@@ -173,18 +182,19 @@ def run_measure(
         if event.key == "q":
             state["running"] = False
         elif event.key == "w":
-            if state["capturing"]:
-                print("  Уже идёт ввод углов — завершите его в терминале.")
+            if state["capturing"] or state["pending"]:
+                print("  Уже идёт фиксация — дождитесь её завершения.")
                 return
             if not latest:
                 print("  Нет данных для фиксации.")
                 return
-            # Берём s1..s4 из кадра, пришедшего к моменту нажатия «w» (без усреднения).
-            s_vals = latest
-            state["capturing"] = True
-            state["msg"] = "введите углы x, y в терминале…"
-            print(f"\n[Фиксация] s={s_vals} — введите углы:")
-            threading.Thread(target=_capture, args=(s_vals,), daemon=True).start()
+            # Запускаем усреднение: следующие cfg.MEASURE_HOLD кадров копятся в
+            # accum (в главном цикле), затем поток _capture спросит углы по
+            # усреднённому s. Держите луч неподвижно, пока идёт захват.
+            accum.clear()
+            state["pending"] = True
+            state["msg"] = f"усреднение {cfg.MEASURE_HOLD} кадров…"
+            print(f"\n[Фиксация] усреднение {cfg.MEASURE_HOLD} кадров — держите луч…")
         elif event.key == "s":
             with lock:
                 if not points:
@@ -203,10 +213,26 @@ def run_measure(
                 break
             s, x_px, y_px = _read_point(row, half)
             latest = s  # запоминаем последний кадр для фиксации по «w»
+            # Усреднение по cfg.MEASURE_HOLD кадрам после «w» (переиспользуем
+            # average_s из калибровки): копим кадры, по достижении порога стартуем
+            # поток ввода углов с усреднённым s.
+            if state["pending"]:
+                accum.append(s)
+                state["msg"] = f"усреднение {len(accum)}/{cfg.MEASURE_HOLD} кадров…"
+                if len(accum) >= cfg.MEASURE_HOLD:
+                    s_avg = average_s(accum)
+                    accum.clear()
+                    state["pending"] = False
+                    state["capturing"] = True
+                    state["msg"] = "введите углы x, y в терминале…"
+                    print(f"[Фиксация] s={s_avg} — введите углы:")
+                    threading.Thread(target=_capture, args=(s_avg,), daemon=True).start()
             point.set_data([x_px], [y_px])
             s_text.set_text("\n".join(f"s{i} = {v:.0f}" for i, v in enumerate(s, 1)))
-            # Во время ввода углов точка зелёная — индикатор, что кадр зафиксирован.
-            _set_point_color(point, "lime" if state["capturing"] else "white")
+            # Точка зелёная во время усреднения/ввода углов — кадр(ы) фиксируются.
+            _set_point_color(
+                point, "lime" if (state["capturing"] or state["pending"]) else "white"
+            )
             info.set_text(f"точек: {len(points)}   {state['msg']}")
             fig.canvas.draw_idle()
             fig.canvas.flush_events()
