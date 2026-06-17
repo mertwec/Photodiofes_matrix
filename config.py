@@ -7,7 +7,7 @@ class SerialConfig:
     # PORT = '/dev/ttyUSB0'  # Измените на ваш порт
 
     BAUDRATE = 115200  # Измените на скорость вашего устройства (часто 9600, 115200)
-    TIMEOUT = 1  # сек на чтение строки
+    TIMEOUT = 0.2  # сек на чтение строки
 
     @property
     def PORT(self):
@@ -19,7 +19,7 @@ class SerialConfig:
 class DisplayConfig:
     SIZE_DISPLAY = 140  # px
     INTERVAL = 0.1  # сек между кадрами (только для данных с лога)
-    MEASURE_HOLD = 3  # кадров усреднения после «w» в режиме measure (Задача №7)
+    MEASURE_HOLD = 3  # кадров усреднения после «g» в режиме measure (Задача №7)
     BASE_DIR = Path(os.path.dirname(__file__))
 
     @property

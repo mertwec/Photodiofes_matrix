@@ -4,16 +4,20 @@
 Поток данных отображается как в stream (live-точка направления засветки), но
 БЕЗ окружности пятна. Точки измерения фиксируются вручную с клавиатуры:
 
-  • «w» — усреднить значения квадрантов s1..s4 по следующим cfg.MEASURE_HOLD
+  • «g» — усреднить значения квадрантов s1..s4 по следующим cfg.MEASURE_HOLD
     кадрам (тем же average_s, что и калибровка) и в ОТДЕЛЬНОМ потоке запросить
-    в терминале углы по x и y (input). Точка кладётся в словарь под ключом
-    i0, i1, … (по порядку нажатий) и, как только приняты ОБА угла, словарь
+    в терминале углы по x и y (input). Точка кладётся в словарь под следующим
+    свободным ключом i0, i1, … и, как только приняты ОБА угла, ВЕСЬ словарь
     сразу сохраняется в DATA/MEASURE/MEASURE.json (автосохранение). После
     этого сбрасывается входной буфер COM-порта (flush_event): пока оператор
     вводил углы, буфер копился — дальше читаем то, что приходит сейчас, а не
     хвост буфера.
   • «s» — сохранить накопленный словарь вручную (дублирует автосохранение).
   • «q» — выход.
+
+С флагом --continue (run_measure(cont=True)) при старте подгружаются уже снятые
+точки из MEASURE.json — нумерация и запись продолжаются, файл дополняется. Без
+флага сессия начинается с нуля (первое сохранение перезапишет старый файл).
 
 Почему ввод в отдельном потоке: input() блокирует. Окно matplotlib продолжает
 крутиться в главном потоке, поэтому live-точка не подвисает, пока пользователь
@@ -80,6 +84,23 @@ def save_measure(points: dict, out_dir: Path | str) -> Path:
     return path
 
 
+def load_measure(out_dir: Path | str) -> dict:
+    """Прочитать ранее снятые точки из MEASURE.json (для --continue). {} если файла нет."""
+    path = Path(out_dir) / "MEASURE.json"
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data.get("points", {})
+
+
+def _next_key(points: dict) -> str:
+    """Следующий свободный ключ iN (устойчив к продолжению и пропускам ключей)."""
+    n = len(points)
+    while f"i{n}" in points:
+        n += 1
+    return f"i{n}"
+
+
 def _set_point_color(point, color: str) -> None:
     point.set_markerfacecolor(color)
     point.set_markeredgecolor(color)
@@ -90,6 +111,7 @@ def run_measure(
     size: int,
     out_dir: Path | str,
     flush_event: threading.Event | None = None,
+    cont: bool = False,
 ) -> None:
     """
     Интерактивный режим фиксации данных.
@@ -100,6 +122,8 @@ def run_measure(
     :param flush_event: событие сброса входного буфера UART (read_serial_rows);
         взводится после завершения ввода углов, чтобы дальше читать текущие
         данные, а не накопившийся за время ввода буфер. None — нет порта (--test).
+    :param cont: --continue — подгрузить уже снятые точки из MEASURE.json и
+        продолжить запись (нумерация и содержимое сохраняются). False — с нуля.
     """
     half = size / 2
     plt.ion()
@@ -108,6 +132,10 @@ def run_measure(
     # наше сохранение (ctrl+s у matplotlib остаётся).
     plt.rcParams["keymap.save"] = [
         k for k in plt.rcParams.get("keymap.save", []) if k != "s"
+    ]
+    # 'g' — наш хоткей записи; снимаем дефолтную matplotlib-сетку с 'g'.
+    plt.rcParams["keymap.grid"] = [
+        k for k in plt.rcParams.get("keymap.grid", []) if k != "g"
     ]
 
     fig, ax = plt.subplots(figsize=(7, 7))
@@ -121,7 +149,7 @@ def run_measure(
     ax.text(
         0,
         lim - 4,
-        "measure   w: фиксация+автосохранение   s: сохранить   q: выход",
+        "measure   g: фиксация+автосохранение   s: сохранить   q: выход",
         color="white",
         fontsize=10,
         ha="center",
@@ -144,8 +172,15 @@ def run_measure(
     (point,) = ax.plot([0], [0], "o", markersize=8, color="white", zorder=5)
 
     latest: list = []  # сырые s1..s4 последнего пришедшего кадра
-    accum: list = []   # буфер усреднения s1..s4 по cfg.MEASURE_HOLD кадрам после «w»
-    points: dict = {}
+    accum: list = []   # буфер усреднения s1..s4 по cfg.MEASURE_HOLD кадрам после «g»
+    # --continue: продолжаем уже снятый MEASURE.json (нумерация и запись с конца).
+    points: dict = load_measure(out_dir) if cont else {}
+    if cont:
+        print(
+            f"[measure] --continue: загружено точек {len(points)} из MEASURE.json"
+            if points
+            else "[measure] --continue: прежних точек нет — начинаем с нуля"
+        )
     lock = threading.Lock()
     # capturing — идёт ввод углов в терминале; pending — идёт усреднение кадров.
     state = {
@@ -164,7 +199,7 @@ def run_measure(
             angle_x = _ask_angle("x")
             angle_y = _ask_angle("y")
             with lock:
-                key = f"i{len(points)}"
+                key = _next_key(points)
                 points[key] = {"s": s_vals, "angle_x": angle_x, "angle_y": angle_y}
                 n = len(points)
                 path = save_measure(points, out_dir)
@@ -181,7 +216,7 @@ def run_measure(
     def on_key(event) -> None:
         if event.key == "q":
             state["running"] = False
-        elif event.key == "w":
+        elif event.key == "g":
             if state["capturing"] or state["pending"]:
                 print("  Уже идёт фиксация — дождитесь её завершения.")
                 return
@@ -212,8 +247,8 @@ def run_measure(
             if not state["running"] or not plt.fignum_exists(fig.number):
                 break
             s, x_px, y_px = _read_point(row, half)
-            latest = s  # запоминаем последний кадр для фиксации по «w»
-            # Усреднение по cfg.MEASURE_HOLD кадрам после «w» (переиспользуем
+            latest = s  # запоминаем последний кадр для фиксации по «g»
+            # Усреднение по cfg.MEASURE_HOLD кадрам после «g» (переиспользуем
             # average_s из калибровки): копим кадры, по достижении порога стартуем
             # поток ввода углов с усреднённым s.
             if state["pending"]:

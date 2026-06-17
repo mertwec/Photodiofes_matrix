@@ -164,12 +164,21 @@ def calibr_cmd(port: str, baudrate: int):
     "--baudrate", default=cfg.BAUDRATE, show_default=True, help="Скорость UART."
 )
 @click.option("--test/--no-test", default=False, show_default=False, help="Test by log")
-def measure_cmd(port: str, baudrate: int, test: bool):
-    """Режим фиксации данных (Задача №7): w — точка + углы x/y, JSON пишется сам."""
-    # Поток как в stream, но без пятна: «w» фиксирует s1..s4 + углы x/y (ввод в
-    # терминале идёт в отдельном потоке); после ввода обоих углов точка сразу
-    # сохраняется в DATA/MEASURE/MEASURE.json, а входной буфер порта сбрасывается
-    # (flush_event), чтобы дальше читать текущие данные, а не накопленный хвост.
+@click.option(
+    "--continue",
+    "do_continue",
+    is_flag=True,
+    default=False,
+    help="Продолжить запись: подгрузить точки из MEASURE.json и дописывать.",
+)
+def measure_cmd(port: str, baudrate: int, test: bool, do_continue: bool):
+    """Режим фиксации данных (Задача №7): g — точка + углы x/y, JSON пишется сам."""
+    # Поток как в stream, но без пятна: «g» фиксирует s1..s4 (усреднение
+    # cfg.MEASURE_HOLD кадров) + углы x/y (ввод в терминале идёт в отдельном
+    # потоке); после ввода обоих углов весь словарь сразу сохраняется в
+    # DATA/MEASURE/MEASURE.json, а входной буфер порта сбрасывается (flush_event),
+    # чтобы дальше читать текущие данные, а не накопленный хвост. С --continue
+    # стартуем не с нуля, а с уже снятых точек из MEASURE.json.
     file_path = Path(cfg.DATA_DIR) / "putty.csv"
     flush_event = None
     if test:
@@ -180,7 +189,11 @@ def measure_cmd(port: str, baudrate: int, test: bool):
         rows = read_serial_rows(port=port, baudrate=baudrate, flush_event=flush_event)
     try:
         run_measure(
-            rows, size=cfg.SIZE_DISPLAY, out_dir=cfg.MEASURE_DIR, flush_event=flush_event
+            rows,
+            size=cfg.SIZE_DISPLAY,
+            out_dir=cfg.MEASURE_DIR,
+            flush_event=flush_event,
+            cont=do_continue,
         )
     finally:
         rows.close()  # освобождаем COM-порт
