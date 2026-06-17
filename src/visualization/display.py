@@ -148,17 +148,28 @@ def display_points_stream(
     # под строкой радиуса.
     ang_text = ax.text(
         -half + 5,
-        half - 24,
+        half - 20,
         "",
-        color="lightgreen",
-        fontsize=9,
+        color="green",
+        fontsize=10,
         ha="left",
         va="top",
         visible=False,
     )
 
     # Разностный сигнал D (право−лево, = x_norm) — сверху слева, под углами.
-    d_text = ax.text(
+    dx_text = ax.text(
+        -half + 5,
+        half - 32,
+        "",
+        color="gold",
+        fontsize=9,
+        ha="left",
+        va="top",
+        visible=False,
+    )
+
+    dy_text = ax.text(
         -half + 5,
         half - 38,
         "",
@@ -238,7 +249,7 @@ def display_points_stream(
                 r_text.set_visible(False)
 
         if frame.v_x is not None and frame.v_y is not None:
-            v_text.set_text(f"v_x={frame.v_x:+.4f}   v_y={frame.v_y:+.4f}")
+            v_text.set_text(f"Vx={frame.v_x:+.4f}   Vy={frame.v_y:+.4f}")
             v_text.set_visible(True)
         else:
             v_text.set_visible(False)
@@ -255,11 +266,14 @@ def display_points_stream(
         else:
             ang_text.set_visible(False)
 
-        if frame.x_norm is not None:
-            d_text.set_text(f"D={frame.x_norm:+.3f}")
-            d_text.set_visible(True)
+        if frame.x_norm is not None and frame.y_norm is not None:
+            dx_text.set_text(f"Dxx={frame.x_norm:+.3f}")
+            dy_text.set_text(f"Dy={frame.y_norm:+.3f}")
+            dy_text.set_visible(True)
+            dx_text.set_visible(True)
         else:
-            d_text.set_visible(False)
+            dx_text.set_visible(False)
+            dy_text.set_visible(False)
 
         if frame.ts:
             ts_text.set_text(f"ts: {frame.ts}")

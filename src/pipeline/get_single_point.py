@@ -215,6 +215,7 @@ def make_point(
                 lost=True,
                 ts=ts,
                 x_norm=x_norm,
+                y_norm=y_norm,
                 s=s_raw,
             )
             continue
@@ -257,6 +258,7 @@ def make_point(
             angle_x=angle_x,
             angle_y=angle_y,
             x_norm=x_norm,
+            y_norm=y_norm,
             s=s_raw,
         )
 
