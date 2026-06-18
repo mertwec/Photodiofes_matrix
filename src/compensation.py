@@ -21,6 +21,7 @@ from scipy.special import erfinv
 from config import cfg
 from src.data_types import CompensationModel
 from src.pipeline.get_single_point import quadrant_fracs
+from src.utils.converter import dm_to_deg
 
 
 # --- базис и дизайн-матрица ---------------------------------------------------
@@ -77,11 +78,15 @@ def diffs_from_s(s, adc_max: float | None = None):
 
 
 def points_to_arrays(points: dict):
-    """{iN: {s, angle_x, angle_y}} → (keys, s[N,4], angle_x[N], angle_y[N])."""
+    """{iN: {s, angle_x, angle_y}} → (keys, s[N,4], angle_x[N], angle_y[N]).
+
+    Углы в MEASURE.json хранятся в записи «градусы.минуты» (DD.MM, напр. '0.20'
+    = 0°20'); dm_to_deg переводит их в настоящие градусы для МНК.
+    """
     keys = list(points)
     s = np.array([points[k]["s"] for k in keys], dtype=float)
-    ax = np.array([float(points[k]["angle_x"]) for k in keys], dtype=float)
-    ay = np.array([float(points[k]["angle_y"]) for k in keys], dtype=float)
+    ax = np.array([dm_to_deg(points[k]["angle_x"]) for k in keys], dtype=float)
+    ay = np.array([dm_to_deg(points[k]["angle_y"]) for k in keys], dtype=float)
     return keys, s, ax, ay
 
 

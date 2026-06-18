@@ -36,6 +36,7 @@ import matplotlib.pyplot as plt
 
 from config import cfg
 from src.calibration import average_s
+from src.utils.converter import deg_to_dm, dm_to_deg
 from src.visualization.display import draw_quadrant_labels
 
 
@@ -58,14 +59,25 @@ def _read_point(row: dict, half: float) -> tuple[tuple[float, ...], float, float
     return s, x_norm * half, y_norm * half
 
 
-def _ask_angle(axis: str) -> float:
-    """Запросить в терминале угол по оси axis (град)."""
+def _ask_angle(axis: str) -> str:
+    """
+    Запросить в терминале угол по оси axis в записи «градусы.минуты» (DD.MM).
+
+    Оператор вводит float, где целая часть — градусы, дробная — угловые минуты
+    (0.20 = 0°20', -1.40 = -1°40', 1.5 = 1°50'). Возвращается канонизированная
+    строка DD.MM — в том же виде угол лежит в MEASURE.json; при построении
+    полинома dm_to_deg переводит её в настоящие градусы (см. compensation.py).
+    """
+    hint = "  Нужно число «градусы.минуты», например 0.20 (=0°20') или -1.40"
     while True:
-        ans = input(f"{axis}: ").strip().replace(",", ".")
+        ans = input(f"{axis} (град.мин): ").strip().replace(",", ".")
+        if not ans:
+            print(hint)
+            continue
         try:
-            return float(ans)
+            return deg_to_dm(dm_to_deg(ans))
         except ValueError:
-            print("  Нужно число, например 2.0 или -2.0")
+            print(hint)
 
 
 def save_measure(points: dict, out_dir: Path | str) -> Path:
@@ -73,7 +85,9 @@ def save_measure(points: dict, out_dir: Path | str) -> Path:
     Сохранить накопленные точки в DATA/MEASURE/MEASURE.json. Возвращает путь.
 
     Формат (см. TASK.md, Задача №7): {created, fov, points: {i0: {s, angle_x,
-    angle_y}, …}}. s — усреднённые сырые значения квадрантов s1..s4.
+    angle_y}, …}}. s — усреднённые сырые значения квадрантов s1..s4. angle_x/
+    angle_y — строки в записи «градусы.минуты» (DD.MM, напр. "0.20" = 0°20');
+    в градусы их переводит converter.dm_to_deg (см. compensation.points_to_arrays).
     """
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     d = Path(out_dir)

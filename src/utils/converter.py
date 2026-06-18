@@ -119,6 +119,46 @@ def dms_to_deg(deg:float, minute:float = 0, seconds:float = 0):
     return deg + minute/60 + seconds/3600
 
 
+def dm_to_deg(value) -> float:
+    """
+    Запись «градусы.минуты» (DD.MM) → угол в градусах (float, до 6 знака).
+
+    Дробная часть строки — это угловые минуты (две позиционные цифры 00..59),
+    а НЕ доля градуса. Принимает str или число (str() применяется внутри):
+
+        '0.2'  = '0.20' = 0°20' = 0.333333
+        '0.30'          = 0°30' = 0.5
+        '1.40'          = 1°40' = 1.666667
+        '-1.40'         = -1°40' = -1.666667
+        '2.00'          = 2°00' = 2.0
+
+    Так хранятся углы в DATA/MEASURE/MEASURE.json: при вычислении полинома их
+    нужно прогонять через эту функцию (см. compensation.points_to_arrays).
+    """
+    text = str(value).strip()
+    if not text:
+        return 0.0
+    sign = -1.0 if text[0] == "-" else 1.0
+    text = text.lstrip("+-")
+    deg_part, _, min_part = text.partition(".")
+    deg = int(deg_part) if deg_part else 0
+    # цифры после точки — позиционные минуты: '2'->20, '20'->20, '05'->5.
+    minutes = int((min_part + "00")[:2]) if min_part else 0
+    return round(sign * (dms_to_deg(deg, minutes)), 6)
+
+
+def deg_to_dm(value: float) -> str:
+    """
+    Угол в градусах → запись «градусы.минуты» (DD.MM), обратная к dm_to_deg.
+
+    Минуты округляются до ближайшей целой и дополняются до двух цифр:
+    0.333 → '0.20', 0.5 → '0.30', 1.667 → '1.40', -0.333 → '-0.20', 0.0 → '0.00'.
+    """
+    sign = "-" if value < -1e-9 else ""
+    deg, minutes = divmod(round(abs(value) * 60), 60)
+    return f"{sign}{deg}.{minutes:02d}"
+
+
 def json_to_print_table(js_file:Path):
     with open(js_file, "r") as f:
         js_data = json.load(f)
@@ -126,6 +166,6 @@ def json_to_print_table(js_file:Path):
     print(f"| i\t\t | s1\t\t | s2\t\t | s3\t\t | s4\t\t | Th_x\t\t | Th_y\t\t")
     print(f"| ---\t\t | ---\t\t | ---\t\t | ---\t\t | ---\t\t | ---\t\t | ---\t\t")
     for i, v in js_data["points"].items():
-        print(f"|{i}\t\t | {v['s'][0]:10}\t | {v['s'][1]}\t | {v['s'][2]}\t | {v['s'][3]}\t | {v['angle_x']}\t\t | {v['angle_y']}\t |")
+        print(f"| {i:>10} | {v['s'][0]:>10} | {v['s'][1]:>10} | {v['s'][2]:>10} | {v['s'][3]:>10} | {v['angle_x']:>10} | {v['angle_y']:>10} |")
 
 

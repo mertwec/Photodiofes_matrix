@@ -27,6 +27,7 @@ from src.pipeline.poly_compensation import (
     load_measure_points,
     save_compensation,
 )
+from src.visualization.data_plot import plot_angle_linearity, plot_measure_data
 
 
 def _term_label(p: int, q: int) -> str:
@@ -168,6 +169,24 @@ def verify_cmd(measure_path, model_path):
         f"точек в фите {model.n_points}, создана {model.created}"
     )
     _print_verify(model, load_measure_points(measure_path))
+
+
+@cli.command("show")
+@click.option("--data", "data_path", type=click.Path(path_type=Path),
+              default=None, help="MEASURE.json (по умолч. cfg.MEASURE_FILE).")
+@click.option("--kind", "-k", type=click.Choice(["linearity", "raw"]),
+              default="linearity", show_default=True,
+              help="linearity: θ от D и erfinv(D) (видна линейность); raw: АЦП от θx/θy.")
+def show_data_cmd(data_path, kind):
+    """Показать графики снятых данных (см. --kind)."""
+    measure_path = Path(data_path) if data_path else cfg.MEASURE_FILE
+    points = load_measure_points(measure_path)
+    if not points:
+        raise click.ClickException(f"нет точек в {measure_path}")
+    click.echo(f"точек: {len(points)} из {measure_path}  (--kind {kind})")
+    title = f"{measure_path}  (точек: {len(points)})"
+    plot = plot_angle_linearity if kind == "linearity" else plot_measure_data
+    plot(points, title=title)
 
 
 if __name__ == "__main__":
