@@ -196,8 +196,8 @@ def make_point(
             else:
                 nz = sum(f > cfg.FRAC_EPS for f in fracs)
 
-        if nz is not None and nz < cfg.NZ_ANGLE_MIN:
-            # Задача №8: сигнал пропал на ≥2 квадрантах — угол не измерить.
+        if nz is not None and nz <= cfg.NZ_ANGLE_MIN:
+            # Задача №8: сигнал пропал на ≥1 квадрантах — угол не измерить.
             # Точка на краю дисплея по последнему измеренному направлению
             # (если его нет или оно нулевое — по текущему); дисплей рисует её
             # жёлтой, вместо углов показывает прочерк.
@@ -212,7 +212,9 @@ def make_point(
                 v_x=row.get("v_x"),
                 v_y=row.get("v_y"),
                 radius=None,
+
                 lost=True,
+
                 ts=ts,
                 x_norm=x_norm,
                 y_norm=y_norm,

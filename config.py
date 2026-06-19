@@ -34,8 +34,6 @@ class DisplayConfig:
     def CALIB_DIR(self):
         return self.BASE_DIR / "DATA" / "CALIB"
 
-
-
     @property
     def MEASURE_DIR(self):
         return self.BASE_DIR / "DATA" / "MEASURE"
@@ -93,7 +91,9 @@ class SensorConfig:
     # Устройство при отсутствии сигнала шлёт 4096 (на 1 выше 12-битного диапазона
     # 0..4095), поэтому ADC_MAX = 3400 — такой кадр даёт нулевую яркость по всем
     # датчикам и распознаётся как «нет сигнала» (точка в центре без окружности).
-    ADC_MAX = 3450
+    ADC_MAX = 3250
+
+    # детектирование потери сигнала
     S_VAL_MAX = 150
     S_VAL_MIN = 3150
 

@@ -88,7 +88,8 @@ def spot_radius_from_points(pts: dict) -> dict | None:
                 f"{key}: знак D={D:+.3f} не согласован со знаком "
                 f"Δθ={dtheta:+.2f}° — проверьте раскладку ph↔s / знак столика"
             )
-        if abs(D) < cfg.CALIB_SIDE_EPS + 0.02:
+        if abs(D) < cfg.CALIB_SIDE_EPS - 0.02 or abs(D) > cfg.CALIB_SIDE_EPS + 0.02:
+
             warnings.append(
                 f"{key}: D={D:+.3f} близко к порогу фиксации "
                 f"({cfg.CALIB_SIDE_EPS}) — точка могла быть снята не в крайнем положении"
@@ -155,6 +156,7 @@ def spot_radius_from_calib(calib_path: Path | str) -> dict | None:
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
     return spot_radius_from_points(data.get("points", {}))
+
 
 def info_calib_radius(calib_file=cfg.CALIB_FILE) -> float | None:
     """

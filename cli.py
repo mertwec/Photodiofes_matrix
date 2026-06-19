@@ -10,7 +10,7 @@ from src.pipeline.calib_radius import info_calib_radius
 from src.pipeline.get_single_point import df_to_raw_rows, make_point
 from src.pipeline.poly_compensation import load_compensation
 from src.reader.file_reader import read_csv_log
-from src.reader.log_writer import make_log_path, tee_to_csv
+from src.reader.log_writer import make_log_path, tee_frames_to_csv
 from src.reader.stream_reader import read_serial_rows
 from src.visualization.display import display_points_stream
 
@@ -20,7 +20,7 @@ def cli():
     """Визуализатор направления засветки с фотодиодной матрицы."""
 
 
-def _comp_model(comps: bool):
+def _compensation_model(comps: bool):
     """Компенсационный полином углов (Задача №13) для make_point, если включён --comps.
 
     Возвращает CompensationModel или None (нет файла / выключено) — тогда углы
@@ -50,7 +50,7 @@ def _comp_model(comps: bool):
     "--file",
     "file_path",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=Path("./DATA/putty.csv"),
+    default=Path("./DATA/LOG_20260619_110246.csv"),
     show_default=True,
     help="CSV-лог с показаниями датчиков.",
 )
@@ -78,7 +78,7 @@ def log_cmd(file_path: Path, size: int, comps: bool):
         val_max=cfg.S_VAL_MAX,
         val_min=cfg.S_VAL_MIN,
         fixed_radius=info_calib_radius(),
-        comp_model=_comp_model(comps),
+        comp_model=_compensation_model(comps),
     )
     # ts (время из T) рисуется живой подписью покадрово, см. Frame.ts / display.
     legend: dict = {
@@ -113,32 +113,35 @@ def stream_cmd(port: str, baudrate: int, log: bool, comps: bool):
     size = cfg.SIZE_DISPLAY
 
     rows = read_serial_rows(port=port, baudrate=baudrate)
+
+    # Задача №5: если есть калибровка — радиус пятна постоянный (из
+    # нож-сканирования); иначе круг не рисуется. Углы: компенсационный полином
+    # (Задача №13) при --comps, иначе нож-модель (нужна калибровка).
+    frames = make_point(
+        rows,
+        size,
+        adc_max,
+        val_max=cfg.S_VAL_MAX,
+        val_min=cfg.S_VAL_MIN,
+        fixed_radius=info_calib_radius(),
+        comp_model=_compensation_model(comps),
+    )
+
+    # Лог пишется ПОСЛЕ make_point: в него идут РАССЧИТАННЫЕ углы angle_x/angle_y
+    # (а не опорные v_x/v_y устройства), время — системное (столбец ts).
     if log:
         log_path = make_log_path(cfg.LOG_DIR)
-        rows = tee_to_csv(rows, log_path)
+        frames = tee_frames_to_csv(frames, log_path)
 
     try:
-        # Задача №5: если есть калибровка — радиус пятна постоянный (из
-        # нож-сканирования); иначе круг не рисуется. Углы: компенсационный полином
-        # (Задача №13) при --comps, иначе нож-модель (нужна калибровка).
-        frames = make_point(
-            rows,
-            size,
-            adc_max,
-            val_max=cfg.S_VAL_MAX,
-            val_min=cfg.S_VAL_MIN,
-            fixed_radius=info_calib_radius(),
-            comp_model=_comp_model(comps),
-        )
-
         legend: dict = {
             "port": port,
             # "quit": "q",
         }
         # interval=0: темп задаёт сам UART (ser.readline блокируется до строки/таймаута).
         display_points_stream(frames, size=size, interval=0, legend=legend)
-
     finally:
+        frames.close()
         rows.close()
 
 

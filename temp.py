@@ -2,6 +2,9 @@ from config import cfg
 from src.utils.converter import json_to_print_table
 from pathlib import Path
 from src.utils.converter import dm_to_deg
+from scipy.optimize import minimize
+
+
 
 def sum_power(data: list, v_min=cfg.S_VAL_MIN):
     return sum([v_min - i for i in data])
