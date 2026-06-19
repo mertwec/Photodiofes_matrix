@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 from scipy.special import erfinv
 
 from config import cfg
-from src.compensation import diffs_from_s, points_to_arrays
+from src.compensation import diffs_from_s, points_to_arrays, predict
 
 # Цвета каналов s1..s4 (фиксированы для обоих подграфиков режима raw).
 _S_COLORS = ("deepskyblue", "gold", "lime", "tomato")
@@ -137,6 +137,66 @@ def plot_angle_linearity(
         axes[0][c].set_title(f"{ang_lbl} от D{name}  —  нож-модель ⇒ erf-кривая")
         _linearity_panel(axes[1][c], u, th, f"erfinv(D{name}) (базис модели)")
         axes[1][c].set_title(f"{ang_lbl} от erfinv(D{name})  —  должна быть прямой")
+
+    fig.tight_layout()
+    plt.show(block=block)
+
+
+def plot_compensation_surface(
+    points: dict, model, title: str | None = None, block: bool = True
+) -> None:
+    """
+    surface: 3D-поверхности θx(Dx,Dy) и θy(Dx,Dy), задаваемые компенсационным
+    полиномом, со снятыми точками и остаточными «стеблями» (измерение → поверхность).
+
+    Две панели рядом: слева θx, справа θy. Полупрозрачная поверхность — это
+    предсказание полинома (predict) на сетке (Dx,Dy) в пределах данных и зоны
+    валидности |D|≤d_max; красные точки — измерения (Dx, Dy, истинный угол);
+    тонкие серые отрезки — остаток от точки до поверхности (та же ошибка фита,
+    что печатает cli_model verify).
+
+    :param points: словарь {iN: {s:[s1..s4], angle_x, angle_y}} из MEASURE.json.
+    :param model: CompensationModel (из COMPENSATION.json).
+    :param title: общий заголовок окна.
+    :param block: блокировать ли выполнение до закрытия окна.
+    """
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  регистрация проекции 3d
+
+    if not points:
+        raise ValueError("нет точек для отображения (пустой MEASURE.json)")
+
+    _, s, ax_ang, ay_ang = points_to_arrays(points)
+    Dx, Dy, _ = diffs_from_s(s)  # раскладка ph↔s и ADC_MAX как в make_point
+    dm = model.d_max
+
+    # Сетка (Dx,Dy) в пределах данных, ограниченная зоной валидности модели.
+    gx = np.linspace(max(Dx.min(), -dm), min(Dx.max(), dm), 45)
+    gy = np.linspace(max(Dy.min(), -dm), min(Dy.max(), dm), 45)
+    GX, GY = np.meshgrid(gx, gy)
+    TXg, TYg = predict(model, GX.ravel(), GY.ravel())
+    TXg, TYg = TXg.reshape(GX.shape), TYg.reshape(GX.shape)
+    # Предсказание в самих точках — концы остаточных стеблей.
+    TXp, TYp = predict(model, Dx, Dy)
+
+    plt.style.use("dark_background")
+    fig = plt.figure(figsize=(13, 6))
+    if title:
+        fig.suptitle(f"{title}  —  поверхность полинома (degree {model.degree})")
+
+    panels = (("θx", TXg, ax_ang, TXp), ("θy", TYg, ay_ang, TYp))
+    for c, (lbl, Zg, ang, pred) in enumerate(panels):
+        axp = fig.add_subplot(1, 2, c + 1, projection="3d")
+        axp.plot_surface(
+            GX, GY, Zg, cmap="viridis", alpha=0.6,
+            linewidth=0, antialiased=True, rstride=2, cstride=2,
+        )
+        for xi, yi, ai, pi in zip(Dx, Dy, ang, pred):  # остаточные стебли
+            axp.plot([xi, xi], [yi, yi], [ai, pi], color="gray", lw=0.6, alpha=0.7)
+        axp.scatter(Dx, Dy, ang, c="tomato", s=14, label="измерения")
+        axp.set_xlabel("Dx")
+        axp.set_ylabel("Dy")
+        axp.set_zlabel(f"{lbl}, °")
+        axp.set_title(f"{lbl}(Dx, Dy)")
 
     fig.tight_layout()
     plt.show(block=block)

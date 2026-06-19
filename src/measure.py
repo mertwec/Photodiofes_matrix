@@ -230,7 +230,7 @@ def run_measure(
     def on_key(event) -> None:
         if event.key == "q":
             state["running"] = False
-        elif event.key == "g":
+        elif event.key == "z":
             if state["capturing"] or state["pending"]:
                 print("  Уже идёт фиксация — дождитесь её завершения.")
                 return

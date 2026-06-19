@@ -18,7 +18,7 @@ class SerialConfig:
 
 class DisplayConfig:
     SIZE_DISPLAY = 140  # px
-    INTERVAL = 0.1  # сек между кадрами (только для данных с лога)
+    INTERVAL = 0.2    # сек между кадрами (только для данных с лога)
     MEASURE_HOLD = 3  # кадров усреднения после «g» в режиме measure (Задача №7)
     BASE_DIR = Path(os.path.dirname(__file__))
 
@@ -34,9 +34,7 @@ class DisplayConfig:
     def CALIB_DIR(self):
         return self.BASE_DIR / "DATA" / "CALIB"
 
-    @property
-    def CALIB_FILE(self):
-        return self.CALIB_DIR / "CALIBRATE.json"
+
 
     @property
     def MEASURE_DIR(self):
@@ -48,10 +46,10 @@ class CalibrateConfig:
     CALIB_CENTER_EPS = 0.05     # |x_norm|,|y_norm| для фиксации положения «центр»
     CALIB_SIDE_EPS = 0.5       # |x_norm| для фиксации «крайнее право/лево»
     CALIB_MIN_FRAC = 0.10       # мин. засветка (max доля квадранта) для валидной позиции
-    CALIB_HOLD = 6              # кадров усреднения после подтверждения клавишей «w»
+    CALIB_HOLD = 5              # кадров усреднения после подтверждения клавишей «w»
 
 
-    D_MAX = 0.999   # |D| ближе к 1 — насыщение: erfinv → ∞, точка непригодна.
+    D_MAX = 0.90   # |D| ближе к 1 — насыщение: erfinv → ∞, точка непригодна.
     EI_D_MIN = 1e-2 # Мин. |erfinv(D_i) − erfinv(D_j)| для устойчивого деления (точки слиплись).
 
     # Постоянный радиус из калибровки (Задача №5): физический w [мм] → пиксели.
@@ -61,15 +59,24 @@ class CalibrateConfig:
     def CALIB_PX_PER_MM(self):
         return self.SIZE_DISPLAY / self.DET_SIZE_MM
 
+    @property
+    def CALIB_FILE(self):
+        return self.CALIB_DIR / "CALIBRATE.json"
+
+
 class CompensationConfig:
     # --- Компенсационный полином (Задача №12/№13, DOCUMENTATION/AI_COMPENSATION.md) ---
     # Корректирует систематику нож-модели: углы θx/θy считаются полиномом от
     # u = erfinv(clip(D, ±COMP_DMAX)) — в этом базисе нож-модель почти линейна.
     COMP_DEGREE = 2               # степень полинома (6 коэф/ось). Анализ §12: оптимум 2.
-    COMP_DMAX = 0.95              # |D| клампится сюда перед erfinv; точки |D|>DMAX
-    #                               (насыщение erf) в фит не берём и в рантайме не корректируем.
     COMP_MAD_K = 3.0              # отбраковка выбросов: |остаток| > K·MAD (опечатки ввода углов).
     COMP_MIN_POINTS_PER_COEF = 3  # мин. точек на коэффициент, иначе предупреждение.
+
+    @property
+    def COMP_DMAX(self):
+        # |D| клампится сюда перед erfinv; точки |D|>D_MAX
+        #                               (насыщение erf) в фит не берём и в рантайме не корректируем.
+        return self.D_MAX
 
     @property
     def MEASURE_FILE(self):
@@ -84,11 +91,11 @@ class CompensationConfig:
 class SensorConfig:
     # Опорный максимум АЦП: raw 0 — max засвет, ADC_MAX — min засвет (яркость 0).
     # Устройство при отсутствии сигнала шлёт 4096 (на 1 выше 12-битного диапазона
-    # 0..4095), поэтому ADC_MAX = 4096 — такой кадр даёт нулевую яркость по всем
+    # 0..4095), поэтому ADC_MAX = 3400 — такой кадр даёт нулевую яркость по всем
     # датчикам и распознаётся как «нет сигнала» (точка в центре без окружности).
-    ADC_MAX = 3500
-    S_VAL_MAX = 40
-    S_VAL_MIN = 3350
+    ADC_MAX = 3450
+    S_VAL_MAX = 150
+    S_VAL_MIN = 3150
 
     COLUMNS = ("T", "s1", "s2", "s3", "s4", "v_x", "v_y")
     SENSOR_COLS = ("s1", "s2", "s3", "s4")
@@ -103,7 +110,7 @@ class SensorConfig:
     # Задача №8: мин. число засвеченных квадрантов для измерения углов.
     # Порог «квадрант засвечен» по доле засветки (quadrant_fracs) — для подсчёта
     # nz в детекции потери позиции (Задача №8).
-    FRAC_EPS = 0.01 # доля засветки, квадрант засчитывается засвеченным, если в нём есть хотя бы 1 % от полной засветки
+    FRAC_EPS = 0.05 # доля засветки, квадрант засчитывается засвеченным, если в нём есть хотя бы 1 % от полной засветки
 
     # nz < NZ_ANGLE_MIN (сигнал пропал на ≥2 квадрантах) → потеря позиции:
     # угол не измерить, точка у края дисплея (жёлтая), вместо углов — прочерк.
