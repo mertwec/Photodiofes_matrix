@@ -6,6 +6,7 @@ from matplotlib.patches import Circle
 
 from config import cfg
 from src.data_types import Frame
+from src.utils.converter import format_duration_hms
 
 
 def draw_quadrant_labels(ax, half: float) -> None:
@@ -118,7 +119,10 @@ def display_points_stream(
         visible=False,
     )
 
-    # Живое время кадра ts (из T, формат H:M:S) — сверху справа
+    # Прошедшее время с начала получения данных (формат H:M:S) — сверху справа.
+    # Считается по часам хоста от первого кадра, а НЕ из устройства: T — это
+    # быстрый кольцевой счётчик (≈1.15 мкс/тик, переполняется ~каждые 9 с),
+    # поэтому пересчитывать его во время нельзя.
     ts_text = ax.text(
         half - 5,
         half - 10,
@@ -182,12 +186,12 @@ def display_points_stream(
 
     # Сырые значения каналов s1..s4 в столбик — справа, под временем кадра.
     s_text = ax.text(
-        half - 5,
-        half - 24,
+        half - 25,
+        half - 20,
         "",
         color="lightgray",
         fontsize=9,
-        ha="right",
+        ha="left",
         va="top",
         family="monospace",
         visible=False,
@@ -201,9 +205,13 @@ def display_points_stream(
 
     fig.canvas.mpl_connect("key_press_event", on_key)
 
+    t_start: float | None = None  # момент первого кадра — отсчёт прошедшего времени
+
     for frame in frames:
         if not state["running"] or not plt.fignum_exists(fig.number):
             break
+        if t_start is None:
+            t_start = time.monotonic()  # начало получения данных
 
         point = frame.point
         if point is None:
@@ -255,8 +263,14 @@ def display_points_stream(
             v_text.set_visible(False)
 
         if frame.lost:
-            # Потеря позиции: углы не измеряются — показываем прочерк.
-            ang_text.set_text("θx= —   θy= —")
+            # Потеря позиции: угол сейчас не измеряется — держим последний
+            # измеренный (жёлтым). Если измерений ещё не было — прочерк.
+            if frame.angle_x is not None and frame.angle_y is not None:
+                ang_text.set_text(
+                    f"θx={frame.angle_x:+.2f}°   θy={frame.angle_y:+.2f}°"
+                )
+            else:
+                ang_text.set_text("θx= —   θy= —")
             ang_text.set_color("yellow")
             ang_text.set_visible(True)
         elif frame.angle_x is not None and frame.angle_y is not None:
@@ -267,7 +281,7 @@ def display_points_stream(
             ang_text.set_visible(False)
 
         if frame.x_norm is not None and frame.y_norm is not None:
-            dx_text.set_text(f"Dxx={frame.x_norm:+.3f}")
+            dx_text.set_text(f"Dx={frame.x_norm:+.3f}")
             dy_text.set_text(f"Dy={frame.y_norm:+.3f}")
             dy_text.set_visible(True)
             dx_text.set_visible(True)
@@ -275,11 +289,9 @@ def display_points_stream(
             dx_text.set_visible(False)
             dy_text.set_visible(False)
 
-        if frame.ts:
-            ts_text.set_text(f"ts: {frame.ts}")
-            ts_text.set_visible(True)
-        else:
-            ts_text.set_visible(False)
+        # Прошедшее время с первого кадра (получения данных), часы хоста.
+        ts_text.set_text(f"t: {format_duration_hms((time.monotonic() - t_start) * 1000)}")
+        ts_text.set_visible(True)
 
         if frame.s is not None:
             s_text.set_text(

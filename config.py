@@ -112,9 +112,9 @@ class SensorConfig:
     # nz в детекции потери позиции (Задача №8).
     FRAC_EPS = 0.05 # доля засветки, квадрант засчитывается засвеченным, если в нём есть хотя бы 1 % от полной засветки
 
-    # nz < NZ_ANGLE_MIN (сигнал пропал на ≥2 квадрантах) → потеря позиции:
+    # nz < NZ_ANGLE_MIN (сигнал пропал на ≥NZ_ANGLE_MIN квадрантах) → потеря позиции:
     # угол не измерить, точка у края дисплея (жёлтая), вместо углов — прочерк.
-    NZ_ANGLE_MIN = 3
+    NZ_ANGLE_MIN = 2
 
 
 class Config(SerialConfig, DisplayConfig, SensorConfig, CalibrateConfig, CompensationConfig):

@@ -17,7 +17,6 @@ from scipy.special import erfinv
 
 from config import cfg
 from src.data_types import CompensationModel, Frame, Point2D
-from src.utils.converter import format_duration_hms
 
 
 def light_direction_to_point(matrix_pd: list[list[float]], size: int) -> Point2D | None:
@@ -142,17 +141,19 @@ def make_point(
     Потеря позиции (Задача №8): если сигнал пропал на ≥2 квадрантах
     (nz < cfg.NZ_ANGLE_MIN), угол измерить нельзя — кадр помечается lost=True,
     точка переносится на край дисплея по направлению последнего измеренного
-    кадра (дисплей рисует её жёлтой, вместо углов — прочерк), круг не рисуется.
+    кадра (дисплей рисует её жёлтой), круг не рисуется. В углы кадра кладётся
+    последний измеренный угол (last_angles) — дисплей показывает его жёлтым;
+    если измерений ещё не было, углы остаются None (дисплей рисует прочерк).
     """
     fracs_on = val_max is not None and val_min is not None
     half = size / 2
     last_dir: tuple[float, float] | None = None  # направление последнего измерения
+    last_angles: tuple[float, float] | None = None  # углы последнего измеренного кадра
     # Задача №13: ленивый импорт predict — иначе цикл compensation→get_single_point.
     comp_predict = None
     if comp_model is not None:
         from src.compensation import predict as comp_predict
     for row in rows:
-        ts = format_duration_hms(row.get("T"))  # время кадра H:M:S из T (мс)
         s_raw = (row["s1"], row["s2"], row["s3"], row["s4"])  # для вывода на дисплей
         # Яркость = max(0, adc_max - raw). Клампим нулём: при отсутствии сигнала
         # устройство шлёт 4096 (> ADC_MAX) — без клампа это дало бы отрицательную
@@ -172,7 +173,6 @@ def make_point(
                 v_y=row.get("v_y"),
                 radius=None,
                 no_signal=True,
-                ts=ts,
                 s=s_raw,
             )
             continue
@@ -200,13 +200,15 @@ def make_point(
             # Задача №8: сигнал пропал на ≥1 квадрантах — угол не измерить.
             # Точка на краю дисплея по последнему измеренному направлению
             # (если его нет или оно нулевое — по текущему); дисплей рисует её
-            # жёлтой, вместо углов показывает прочерк.
+            # жёлтой. В углы кладём последний измеренный угол (если он был),
+            # чтобы дисплей держал его жёлтым вместо прочерка.
             dx, dy = x_norm, y_norm
             if last_dir is not None and max(abs(last_dir[0]), abs(last_dir[1])) > 0:
                 dx, dy = last_dir
             m = max(abs(dx), abs(dy))
             if m > 0:
                 point = Point2D(dx / m * half, dy / m * half)
+            lost_ax, lost_ay = (last_angles or (None, None))
             yield Frame(
                 point=point,
                 v_x=row.get("v_x"),
@@ -215,7 +217,8 @@ def make_point(
 
                 lost=True,
 
-                ts=ts,
+                angle_x=lost_ax,
+                angle_y=lost_ay,
                 x_norm=x_norm,
                 y_norm=y_norm,
                 s=s_raw,
@@ -251,12 +254,15 @@ def make_point(
             w_mm = radius * cfg.DET_SIZE_MM / size
             angle_x, angle_y = deflection_angles(x_norm, y_norm, w_mm, cfg.FOC)
 
+        # Запоминаем последний измеренный угол — его покажем при потере позиции.
+        if angle_x is not None and angle_y is not None:
+            last_angles = (angle_x, angle_y)
+
         yield Frame(
             point=point,
             v_x=row.get("v_x"),
             v_y=row.get("v_y"),
             radius=radius,
-            ts=ts,
             angle_x=angle_x,
             angle_y=angle_y,
             x_norm=x_norm,

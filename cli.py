@@ -80,7 +80,8 @@ def log_cmd(file_path: Path, size: int, comps: bool):
         fixed_radius=info_calib_radius(),
         comp_model=_compensation_model(comps),
     )
-    # ts (время из T) рисуется живой подписью покадрово, см. Frame.ts / display.
+    # Прошедшее время с первого кадра рисуется живой подписью покадрово (часы
+    # хоста, см. display_points_stream) — время устройства T для этого не годится.
     legend: dict = {
         "frames": len(df),
         # "adc_max": int(adc_max),

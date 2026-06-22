@@ -32,8 +32,9 @@ def tee_frames_to_csv(
     Колонки лога: ts — системное время записи (YYYYmmdd_HHMMSS.ffffff), затем
     сырые s1..s4 кадра и РАССЧИТАННЫЕ углы отклонения angle_x, angle_y (град).
     Опорные v_x/v_y устройства в лог НЕ пишутся (они считаются неверно) — вместо
-    них идут рассчитанные углы. Кадры без углов (нет сигнала / потеря позиции,
-    angle_*=None) получают пустые поля angle_x/angle_y.
+    них идут рассчитанные углы. Кадры без измеренного угла (нет сигнала / потеря
+    позиции) получают пустые поля angle_x/angle_y: в потерянных кадрах угол не
+    измеряется, а удержанный для дисплея последний угол в лог НЕ пишется.
 
     Файл открывается лениво — на первом кадре, чтобы при мгновенном выходе
     не оставался пустой LOG. Каждая строка flush'ится: при обрыве UART/Ctrl-C
@@ -58,11 +59,16 @@ def tee_frames_to_csv(
                 print(f"Запись лога: {path}")
             s = frame.s or (None, None, None, None)
             ts = datetime.now().strftime("%Y%m%d_%H%M%S.%f")
+            # При потере позиции угол не измерен — Frame несёт удержанный для
+            # дисплея последний угол, но в лог пишем пусто (лог = реально
+            # измеренные углы).
+            ang_x = None if frame.lost else frame.angle_x
+            ang_y = None if frame.lost else frame.angle_y
             writer.writerow({
                 "ts": ts,
                 "s1": s[0], "s2": s[1], "s3": s[2], "s4": s[3],
-                "angle_x": _ang(frame.angle_x),
-                "angle_y": _ang(frame.angle_y),
+                "angle_x": _ang(ang_x),
+                "angle_y": _ang(ang_y),
             })
             f.flush()
             yield frame
