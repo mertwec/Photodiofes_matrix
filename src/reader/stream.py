@@ -5,13 +5,7 @@ from typing import Generator
 import serial
 
 from config import cfg
-from src.utils.parsing_uart import (
-    DARK_LEVEL,
-    SOF,
-    extract_frames,
-    parse_data_block,
-    rows_from_packets,
-)
+from src.utils.parsing_uart import extract_frames, parse_data_block, rows_from_packets
 
 # Устройство шлёт поля через ';' (06800606;0018;0036;0111;0153;-0.079;-0.024),
 # но логи/CSV используют ','. Принимаем оба разделителя.
@@ -86,7 +80,7 @@ def read_serial_uart(
     baudrate: int | None = None,
     timeout: float | None = None,
     flush_event: threading.Event | None = None,
-    dark_level: int = DARK_LEVEL,
+    dark_level: int = cfg.UART_DARK_LEVEL,
     adc_max: float | None = None,
 ) -> Generator[dict, None, None]:
     """
@@ -137,8 +131,8 @@ def read_serial_uart(
             # Синхробайты могли разорваться между порциями: одиночный 0xAA в
             # конце буфера как SOF не найдётся и был бы отброшен вместе с
             # мусором — сохраняем его до следующего чтения.
-            if not tail and buf.endswith(SOF[:1]):
-                tail = SOF[:1]
+            if not tail and buf.endswith(cfg.UART_SOF[:1]):
+                tail = cfg.UART_SOF[:1]
             buf = tail
 
             packets = [p for p in map(parse_data_block, blocks) if p is not None]

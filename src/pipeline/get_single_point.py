@@ -135,6 +135,12 @@ def points_by_angles(
             point = angles_to_point(frame.v_x, frame.v_y, size)
             if point is not None:
                 frame.point = point
+
+        frame.angle_x = None
+        frame.angle_y = None
+        frame.x_norm = None
+        frame.y_norm = None
+
         yield frame
 
 

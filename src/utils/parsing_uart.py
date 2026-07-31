@@ -25,6 +25,11 @@ CSV-логи, и новый формат.
 сохраняется точно, и make_point (а с ним и компенсационный полином) работает с
 такими строками без изменений.
 
+Константы протокола (синхробайты, длина и раскладка блока данных, биты поля
+признаков, шкала отсчётов) заданы спецификацией и лежат в
+config.py::SensorConfig как cfg.UART_* — общие с генератором синтетики
+src/syntetic/generator_data.py.
+
 Самопроверка на синтетике: `python -m src.utils.parsing_uart`.
 """
 
@@ -34,23 +39,6 @@ from typing import Iterable, Iterator, Sequence
 
 from config import cfg
 from src.utils.converter import dms_to_deg
-
-# --- Кадр обмена (§3) ---
-SOF = b"\xaa\x55"
-LEN_DATA = 30  # длина блока данных, редакция 1.1
-# Раскладка блока (§5): uptime, углы X/Y как град/мин/сек, служебные поля,
-# счётчик измерений и четыре отсчёта квадрантов.
-FMT30 = "<IbBBbBBBBHHBBIHHHH"
-
-# --- Поле признаков (§6) ---
-F_EXT_RANGE = 0x01
-F_X_NEG = 0x08
-F_Y_NEG = 0x10
-F_VALID = 0x20
-
-# --- Отсчёты квадрантов (§5.1) ---
-ADC_FULL = 4095
-DARK_LEVEL = 2048  # типовой отсчёт при отсутствии засветки; изделием не передаётся
 
 
 def crc16_ccitt(data: Iterable[int], crc: int = 0xFFFF) -> int:
@@ -75,14 +63,16 @@ def parse_data_block(d: bytes) -> dict | None:
     Знак угла берётся ИСКЛЮЧИТЕЛЬНО из битов X_NEG/Y_NEG поля признаков (§7):
     при |угол| < 1° поле градусов равно нулю и знак в нём не представим.
     """
-    if len(d) < LEN_DATA:
+    if len(d) < cfg.UART_LEN_DATA:
         return None
 
     (uptime, xd, xm, xs, yd, ym, ys, locked, quality,
-     cvalid, cmiss, vpct, flags, count, *adc) = struct.unpack(FMT30, d[:LEN_DATA])
+     cvalid, cmiss, vpct, flags, count, *adc) = struct.unpack(
+        cfg.UART_FMT30, d[: cfg.UART_LEN_DATA]
+    )
 
-    x_deg = dms_to_deg(xd, xm, xs, negative=bool(flags & F_X_NEG))
-    y_deg = dms_to_deg(yd, ym, ys, negative=bool(flags & F_Y_NEG))
+    x_deg = dms_to_deg(xd, xm, xs, negative=bool(flags & cfg.UART_F_X_NEG))
+    y_deg = dms_to_deg(yd, ym, ys, negative=bool(flags & cfg.UART_F_Y_NEG))
 
     return dict(
         uptime_ms=uptime,
@@ -94,14 +84,14 @@ def parse_data_block(d: bytes) -> dict | None:
         consec_miss=cmiss,
         valid_percent=vpct,
         frame_count=count,
-        ext_range=bool(flags & F_EXT_RANGE),
+        ext_range=bool(flags & cfg.UART_F_EXT_RANGE),
         mode=(flags >> 1) & 0x03,
-        valid=bool(flags & F_VALID),
+        valid=bool(flags & cfg.UART_F_VALID),
         adc=adc,  # [S1, S2, S3, S4]
     )
 
 
-def quadrant_levels(adc: Sequence[int], dark_level: int = DARK_LEVEL) -> tuple:
+def quadrant_levels(adc: Sequence[int], dark_level: int = cfg.UART_DARK_LEVEL) -> tuple:
     """
     Относительные засветки квадрантов и разностные сигналы (§5.1).
 
@@ -116,7 +106,7 @@ def quadrant_levels(adc: Sequence[int], dark_level: int = DARK_LEVEL) -> tuple:
         return s, 0.0, 0.0, 0.0
     return (
         s,
-        total / (4 * ADC_FULL),
+        total / (4 * cfg.UART_ADC_FULL),
         (s[3] + s[2] - s[0] - s[1]) / total,  # rx
         (s[0] + s[3] - s[1] - s[2]) / total,  # ry
     )
@@ -131,7 +121,7 @@ def extract_frames(buf: bytes) -> tuple[list[bytes], bytes]:
     out: list[bytes] = []
     i = 0
     while True:
-        i = buf.find(SOF, i)
+        i = buf.find(cfg.UART_SOF, i)
         if i < 0:
             return out, b""
         if i + 3 > len(buf):
@@ -159,7 +149,7 @@ def iter_packets(data: bytes) -> Iterator[dict]:
 
 def adc_to_raw(
     adc: Sequence[int],
-    dark_level: int = DARK_LEVEL,
+    dark_level: int = cfg.UART_DARK_LEVEL,
     adc_max: float | None = None,
 ) -> tuple[float, float, float, float]:
     """
@@ -180,7 +170,7 @@ def adc_to_raw(
 
 def rows_from_packets(
     packets: Iterable[dict],
-    dark_level: int = DARK_LEVEL,
+    dark_level: int = cfg.UART_DARK_LEVEL,
     adc_max: float | None = None,
 ) -> Iterator[dict]:
     """
@@ -212,7 +202,7 @@ def read_uart_bytes(path: Path | str) -> bytes:
     игнорируются) или двоичный — определяется по первым байтам файла.
     """
     data = Path(path).read_bytes()
-    if data.startswith(SOF):
+    if data.startswith(cfg.UART_SOF):
         return data
     cleaned = "".join(data.decode("ascii", errors="ignore").split())
     if len(cleaned) % 2:
@@ -229,20 +219,20 @@ def is_uart_log(path: Path | str, probe: int = 4096) -> bool:
     CSV (тот начинается с заголовка или числа) и выбрать нужный ридер.
     """
     head = Path(path).read_bytes()[:probe]
-    if head.startswith(SOF):
+    if head.startswith(cfg.UART_SOF):
         return True
     cleaned = "".join(head.decode("ascii", errors="ignore").split())[:4]
     if len(cleaned) < 4:
         return False
     try:
-        return bytes.fromhex(cleaned) == SOF
+        return bytes.fromhex(cleaned) == cfg.UART_SOF
     except ValueError:
         return False
 
 
 def read_uart_log(
     path: Path | str,
-    dark_level: int = DARK_LEVEL,
+    dark_level: int = cfg.UART_DARK_LEVEL,
     adc_max: float | None = None,
 ) -> tuple[list[dict], float, dict]:
     """
@@ -319,8 +309,8 @@ if __name__ == "__main__":
             ext_range=p["ext_range"],
             mode=p["mode"],
         )
-        same_bytes += again[3 : 3 + LEN_DATA] == block
-        same_fields += parse_data_block(again[3 : 3 + LEN_DATA]) == p
+        same_bytes += again[3 : 3 + cfg.UART_LEN_DATA] == block
+        same_fields += parse_data_block(again[3 : 3 + cfg.UART_LEN_DATA]) == p
 
     print(
         f"обратная сборка: поля {same_fields}/{len(blocks)}, "

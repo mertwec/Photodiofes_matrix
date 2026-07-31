@@ -62,26 +62,13 @@ def generate_random_data(dimension: int = 2) -> list[list[float]]:
     return [[random.random() for _ in range(dimension)] for _ in range(dimension)]
 
 
-# --- Кадр обмена (§3) ---
-SOF = b"\xaa\x55"  # синхробайты 0xAA, 0x55
-LEN_REV11 = 30  # длина блока данных, редакция 1.1 (в 1.0 было 22)
-# Раскладка блока данных (§5, приложение Б): u32 + углы + служебные + 4 отсчёта.
-FMT30 = "<IbBBbBBBBHHBBIHHHH"
+# Константы протокола (кадр §3, поле признаков §6, отсчёты квадрантов §5.1)
+# лежат в config.py::SensorConfig как cfg.UART_* — общие с парсером
+# src/utils/parsing_uart.py. Ниже — только параметры самой синтетики.
 
-# --- Поле признаков (§6) ---
-F_EXT_RANGE = 0x01  # угол определён в расширенном диапазоне
-F_MODE = 0x06  # биты 1..2: режим вычисления угла
-F_X_NEG = 0x08  # угол по X отрицательный
-F_Y_NEG = 0x10  # угол по Y отрицательный
-F_VALID = 0x20  # измерение достоверно
-
-# --- Отсчёты квадрантов (§5.1) ---
-ADC_FULL = 4095  # 12 бит
-DARK_LEVEL = 2048  # типовой отсчёт при отсутствии сигнала
-BRIGHT_LEVEL = 186  # типовой отсчёт при максимальной засветке
 # Σ относительной засветки четырёх квадрантов. 4000 — как в примере §8
 # (даёт качество сигнала 62). Значение задаёт «яркость» источника: при
-# сильном смещении пятна в угол квадрант упирается в BRIGHT_LEVEL.
+# сильном смещении пятна в угол квадрант упирается в cfg.UART_BRIGHT_LEVEL.
 TOTAL_COUNTS = 4000
 
 # Радиус пятна w [мм] по уровню 1/e² — из зафиксированной калибровки
@@ -116,7 +103,7 @@ def crc16_ccitt(data: bytes, crc: int = 0xFFFF) -> int:
 
 def diffs_from_adc(
     adc: Sequence[int],
-    dark_level: int = DARK_LEVEL,
+    dark_level: int = cfg.UART_DARK_LEVEL,
 ) -> tuple[float, float, int]:
     """
     Отсчёты квадрантов → разностные сигналы (§5.1).
@@ -139,8 +126,8 @@ def adc_from_diffs(
     rx: float,
     ry: float,
     total_counts: int = TOTAL_COUNTS,
-    dark_level: int = DARK_LEVEL,
-    bright_level: int = BRIGHT_LEVEL,
+    dark_level: int = cfg.UART_DARK_LEVEL,
+    bright_level: int = cfg.UART_BRIGHT_LEVEL,
     noise: Callable[[], float] | None = None,
 ) -> tuple[int, int, int, int]:
     """
@@ -165,17 +152,17 @@ def adc_from_diffs(
         value = dark_level - total_counts * max(0.0, weight)
         if noise is not None:
             value += noise()
-        out.append(int(min(ADC_FULL, max(bright_level, round(value)))))
+        out.append(int(min(cfg.UART_ADC_FULL, max(bright_level, round(value)))))
     return tuple(out)  # type: ignore[return-value]
 
 
-def signal_quality(adc: Sequence[int], dark_level: int = DARK_LEVEL) -> int:
+def signal_quality(adc: Sequence[int], dark_level: int = cfg.UART_DARK_LEVEL) -> int:
     """
     Качество сигнала 0…255 (§5): суммарная относительная засветка,
     нормированная на 4·4095. Проверка по примеру §8: Σ = 4000 → 62.
     """
     _, _, total = diffs_from_adc(adc, dark_level)
-    return min(255, max(0, round(255.0 * total / (4.0 * ADC_FULL))))
+    return min(255, max(0, round(255.0 * total / (4.0 * cfg.UART_ADC_FULL))))
 
 
 def angle_to_diff(angle_deg: float, w_mm: float = W_MM, foc_mm: float = cfg.FOC) -> float:
@@ -220,16 +207,16 @@ def build_packet(
 
     flags = (mode & 0x03) << 1
     if ext_range:
-        flags |= F_EXT_RANGE
+        flags |= cfg.UART_F_EXT_RANGE
     if x_neg:
-        flags |= F_X_NEG
+        flags |= cfg.UART_F_X_NEG
     if y_neg:
-        flags |= F_Y_NEG
+        flags |= cfg.UART_F_Y_NEG
     if valid:
-        flags |= F_VALID
+        flags |= cfg.UART_F_VALID
 
     block = struct.pack(
-        FMT30,
+        cfg.UART_FMT30,
         uptime_ms & 0xFFFFFFFF,  # переполнение u32 ≈ через 49.7 суток (§5)
         -xd if x_neg else xd,
         xm,
@@ -247,9 +234,10 @@ def build_packet(
         *(int(v) & 0xFFFF for v in adc),
     )
 
-    head = bytes((LEN_REV11,)) + block  # CRC считается по LEN и блоку данных
+    head = bytes((cfg.UART_LEN_DATA,)) + block  # CRC считается по LEN и блоку данных
     crc = crc16_ccitt(head)
-    return SOF + head + bytes((crc >> 8, crc & 0xFF))  # CRC — старшим байтом вперёд
+    # CRC передаётся старшим байтом вперёд
+    return cfg.UART_SOF + head + bytes((crc >> 8, crc & 0xFF))
 
 
 # Контрольный пример из §8: 123456 мс, X +6°5'21", Y −0°28'39", захват есть,
@@ -424,9 +412,8 @@ def generate_uart_log(
     # Отсчёты квадрантов лежат в конце блока данных (смещение 22 в блоке, 25 в
     # посылке). Упёршийся в bright_level квадрант — насыщение: rx/ry в таком
     # кадре уже не совпадут с углом, о чём есть смысл сообщить.
-    saturated = sum(
-        1 for p in packets if min(struct.unpack("<4H", p[25:33])) <= BRIGHT_LEVEL
-    )
+    bright = cfg.UART_BRIGHT_LEVEL
+    saturated = sum(1 for p in packets if min(struct.unpack("<4H", p[25:33])) <= bright)
 
     return {
         "path": out_path,
@@ -449,7 +436,7 @@ def verify_uart_log(path: str | Path) -> dict:
     ok = skipped = 0
     i = 0
     while True:
-        i = data.find(SOF, i)
+        i = data.find(cfg.UART_SOF, i)
         if i < 0:
             return {"crc_ok": ok, "resync_bytes": skipped, "tail_bytes": 0}
         if i + 3 > len(data):

@@ -40,7 +40,7 @@ def cli():
     "--one-line/--per-packet-line",
     default=False,
     show_default=True,
-    help="Весь дамп одной строкой (как DATA/UART_LOG/log.txt) или по посылке на строку.",
+    help="Весь дамп одной строкой или по посылке на строку (как DATA/UART_LOG/log.txt).",
 )
 def synthetic_uart_log_cmd(
     logname: str,
