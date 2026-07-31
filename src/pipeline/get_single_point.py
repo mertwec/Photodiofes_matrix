@@ -76,6 +76,68 @@ def deflection_angles(
     return ang(x_norm), ang(y_norm)
 
 
+def angles_to_point(
+    angle_x: float | None,
+    angle_y: float | None,
+    size: int,
+    foc: float | None = None,
+    det_size_mm: float | None = None,
+) -> Point2D | None:
+    """
+    Углы отклонения (градусы) → точка на дисплее (Задача №15).
+
+    Обратный ход к θ = atan(d / FOC) из `deflection_angles`: смещение центра
+    пятна на датчике d = FOC · tg θ [мм] переводится в пиксели дисплея, где
+    вся активная зона датчика DET_SIZE_MM отображается на весь дисплей size
+    (масштаб size / DET_SIZE_MM, тот же, что у радиуса пятна).
+
+    Это ФИЗИЧЕСКОЕ положение центра пятна, а не разностный сигнал: обычная
+    точка (light_direction_to_point) строится по D и сжата функцией erf, здесь
+    же масштаб линейный. Нож-модель и радиус пятна тут не нужны — только фокус.
+    Точка ограничивается краем дисплея. None, если угла нет.
+    """
+    if angle_x is None or angle_y is None:
+        return None
+
+    foc = cfg.FOC if foc is None else foc
+    det_size_mm = cfg.DET_SIZE_MM if det_size_mm is None else det_size_mm
+    if foc <= 0 or det_size_mm <= 0:
+        return None
+
+    px_per_mm = size / det_size_mm
+    half = size / 2
+
+    def coord(angle: float) -> float:
+        d_mm = foc * math.tan(math.radians(angle))
+        return max(-half, min(half, d_mm * px_per_mm))
+
+    return Point2D(coord(angle_x), coord(angle_y))
+
+
+def points_by_angles(
+    frames: Iterable[Frame],
+    size: int = cfg.SIZE_DISPLAY,
+) -> Generator[Frame, None, None]:
+    """
+    Переставляет точку кадра на положение по ПЕРЕДАННЫМ углам v_x/v_y (Задача №15).
+
+    Ставится между make_point и дисплеем: кадр отдаётся дальше как есть, но с
+    точкой из `angles_to_point`. Кадры без переданных углов (старый CSV без
+    v_x/v_y, посылки без признака захвата/достоверности) проходят нетронутыми —
+    у них остаётся точка, вычисленная по квадрантам.
+
+    Кадры «нет сигнала» не трогаются: красная точка в центре — это состояние, а
+    не измерение. Признак потери позиции (жёлтая точка) сохраняется, но точку
+    при наличии углов всё равно рисуем по ним.
+    """
+    for frame in frames:
+        if not frame.no_signal:
+            point = angles_to_point(frame.v_x, frame.v_y, size)
+            if point is not None:
+                frame.point = point
+        yield frame
+
+
 def quadrant_fracs(
     raw: Iterable[float],
     val_max: float,

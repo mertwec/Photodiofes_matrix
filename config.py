@@ -38,6 +38,10 @@ class DisplayConfig:
     def MEASURE_DIR(self):
         return self.BASE_DIR / "DATA" / "MEASURE"
 
+    @property
+    def SYNTHETIC_DIR(self):
+        return self.BASE_DIR / "DATA" / "SYNTHETIC"
+
 
 class CalibrateConfig:
     # --- Калибровка нож-сканированием (Задача №4, AI_ANSWER.md §4) ---

@@ -115,8 +115,25 @@ def format_duration_hms(t) -> str | None:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
-def dms_to_deg(deg:float, minute:float = 0, seconds:float = 0):
-    return deg + minute/60 + seconds/3600
+def deg_to_dms(angle_deg: float) -> tuple[int, int, int, bool]:
+    """
+    Угол в градусах → (градусы, минуты, секунды, признак отрицательности).
+
+    Разрешение 1 угловая секунда, диапазон представления ±127°59'59" (§7);
+    выход за диапазон ограничивается. Знак возвращается отдельно, потому что в
+    посылке он передаётся битами X_NEG/Y_NEG поля признаков, а не знаком поля
+    градусов (при |угол| < 1° поле градусов равно нулю и знак в нём не виден).
+    """
+    negative = angle_deg < 0
+    total_sec = round(abs(angle_deg) * 3600.0)
+    total_sec = min(total_sec, 127 * 3600 + 59 * 60 + 59)
+    return total_sec // 3600, (total_sec % 3600) // 60, total_sec % 60, negative
+
+
+def dms_to_deg(deg: int, minutes: int = 0, sec: int = 0, negative: bool = False) -> float:
+    """Обратное к `deg_to_dms`: |угол| = |град| + мин/60 + сек/3600 (§7)."""
+    value = abs(deg) + minutes / 60.0 + sec / 3600.0
+    return -value if negative else value
 
 
 def dm_to_deg(value) -> float:
