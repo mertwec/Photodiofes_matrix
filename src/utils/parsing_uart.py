@@ -2,16 +2,18 @@
 Приём и разбор посылок UART (Задача №15).
 
 Формат — DOCUMENTATION/uart_interface_specification.pdf (изделие AGS 16.00.10,
-редакция 1.1). Посылка: два синхробайта, длина блока, блок данных, CRC.
+редакция 1.2). Посылка: два синхробайта, длина блока, блок данных, CRC.
 
     AA 55 | LEN | блок данных LEN байт | CRC_hi CRC_lo
 
 Числовые поля блока — младшим байтом вперёд, CRC-16/CCITT-FALSE — старшим
 байтом вперёд и считается по байту LEN и всему блоку (§4). Границы посылки
-берутся из поля LEN, а не из константы 35 (§3), но разбирается только блок
-редакции 1.1 (LEN = 30, с отсчётами квадрантов) — посылки другой длины
-пропускаются. Единственный признак верной синхронизации — сошедшаяся CRC,
-поэтому при несовпадении поиск 0xAA 0x55 продолжается со следующего байта.
+берутся из поля LEN, а не из константы 36 (§3), но разбирается только блок
+текущей редакции 1.2 (LEN = 31: отсчёты квадрантов + ступень усиления) —
+посылки меньшей длины пропускаются, у более длинных неизвестный остаток блока
+игнорируется (§3, требование к приёмнику). Единственный признак верной
+синхронизации — сошедшаяся CRC, поэтому при несовпадении поиск 0xAA 0x55
+продолжается со следующего байта.
 
 Модуль читает и текстовый hex-дамп (как DATA/SYNTHETIC/uart_log.txt и
 DATA/UART_LOG/log.txt), и двоичный дамп, и определяет формат файла
@@ -24,6 +26,16 @@ CSV-логи, и новый формат.
 `adc_to_raw` переводит одно в другое: относительная засветка S_i = N0 − adc_i
 сохраняется точно, и make_point (а с ним и компенсационный полином) работает с
 такими строками без изменений.
+
+Ступень усиления (§5.2, редакция 1.2). Усиление приёмного тракта изделие
+выбирает автоматически в диапазоне 150× шестью ступенями, поэтому отсчёты
+квадрантов имеют смысл только вместе с номером ступени: приведённое к общей
+шкале значение = S_i / относительное усиление (`gain_relative`). Внутри одной
+посылки ступень общая для всех четырёх квадрантов, так что на разностные
+сигналы rx/ry (а значит и на точку с углами) она не влияет и в шкалу пайплайна
+не вводится — она нужна для сопоставления УРОВНЕЙ между посылками. Бит
+перегрузки тракта делает угол посылки недостоверным независимо от бита VALID —
+`rows_from_packets` это учитывает.
 
 Константы протокола (синхробайты, длина и раскладка блока данных, биты поля
 признаков, шкала отсчётов) заданы спецификацией и лежат в
@@ -53,26 +65,43 @@ def crc16_ccitt(data: Iterable[int], crc: int = 0xFFFF) -> int:
     return crc
 
 
+def gain_relative(step: int) -> int | None:
+    """
+    Номер ступени усиления (§5.2) → относительное усиление (1…150).
+
+    None для не используемых спецификацией номеров 6…15: привести отсчёты
+    такой посылки к общей шкале нечем.
+    """
+    steps = cfg.UART_GAIN_RELATIVE
+    return steps[step] if 0 <= step < len(steps) else None
+
+
 def parse_data_block(d: bytes) -> dict | None:
     """
-    Блок данных (30 байт, редакция 1.1) → словарь полей (§5, §6, §7).
+    Блок данных (31 байт, редакция 1.2) → словарь полей (§5, §6, §7).
 
-    Возвращает None для блока другой длины (в том числе для редакции 1.0 —
-    22 байта без отсчётов квадрантов).
+    Возвращает None для блока меньшей длины (редакции 1.0 и 1.1); у более
+    длинного блока разбираются поля этой редакции, неизвестный остаток
+    игнорируется — так требует §3.
 
     Знак угла берётся ИСКЛЮЧИТЕЛЬНО из битов X_NEG/Y_NEG поля признаков (§7):
     при |угол| < 1° поле градусов равно нулю и знак в нём не представим.
+
+    Ступень усиления (§5.2) разбирается на номер, относительное усиление и
+    признаки состояния тракта: автоматический выбор, перегрузка, поиск сигнала,
+    отказ канала контроля суммарной засветки.
     """
     if len(d) < cfg.UART_LEN_DATA:
         return None
 
     (uptime, xd, xm, xs, yd, ym, ys, locked, quality,
-     cvalid, cmiss, vpct, flags, count, *adc) = struct.unpack(
-        cfg.UART_FMT30, d[: cfg.UART_LEN_DATA]
+     cvalid, cmiss, vpct, flags, count, *adc, gain) = struct.unpack(
+        cfg.UART_FMT31, d[: cfg.UART_LEN_DATA]
     )
 
     x_deg = dms_to_deg(xd, xm, xs, negative=bool(flags & cfg.UART_F_X_NEG))
     y_deg = dms_to_deg(yd, ym, ys, negative=bool(flags & cfg.UART_F_Y_NEG))
+    gain_step = gain & cfg.UART_G_STEP
 
     return dict(
         uptime_ms=uptime,
@@ -88,6 +117,12 @@ def parse_data_block(d: bytes) -> dict | None:
         mode=(flags >> 1) & 0x03,
         valid=bool(flags & cfg.UART_F_VALID),
         adc=adc,  # [S1, S2, S3, S4]
+        gain_step=gain_step,
+        gain_rel=gain_relative(gain_step),
+        gain_auto=bool(gain & cfg.UART_G_AUTO),
+        overload=bool(gain & cfg.UART_G_OVERLOAD),
+        searching=bool(gain & cfg.UART_G_SEARCH),
+        sum_fault=bool(gain & cfg.UART_G_SUM_FAULT),
     )
 
 
@@ -99,6 +134,11 @@ def quadrant_levels(adc: Sequence[int], dark_level: int = cfg.UART_DARK_LEVEL) -
 
     dark_level — типовой ориентир; точное значение изделием не передаётся.
     Возвращает (S, Σ/(4·4095), rx, ry).
+
+    Уровни S даны как есть, на ступени усиления этой посылки (§5.2): между
+    посылками их можно сравнивать только после деления на `gain_relative(step)`.
+    На rx/ry ступень не влияет — внутри посылки она общая для всех квадрантов
+    и в отношении сокращается.
     """
     s = [max(0, dark_level - int(v)) for v in adc]
     total = sum(s)
@@ -178,13 +218,18 @@ def rows_from_packets(
 
     T — время работы изделия, мс (uptime_ms). v_x/v_y — переданные изделием
     углы отклонения по осям, градусы; они заполняются только когда изделие
-    считает измерение годным (признак захвата + бит VALID, §7), иначе None —
-    в остальных случаях поля углов не определены.
+    считает измерение годным (признак захвата + бит VALID, §7) и тракт не в
+    перегрузке (§5.2: при перегрузке угол недостоверен независимо от бита
+    VALID), иначе None — в остальных случаях поля углов не определены.
+
+    Ступень усиления в строку не выносится: на отсчёты в шкале пайплайна она
+    влияет как общий множитель, который сокращается в разностных сигналах
+    (см. `adc_to_raw` и `gain_relative`).
     """
     adc_max = cfg.ADC_MAX if adc_max is None else adc_max
     for packet in packets:
         s1, s2, s3, s4 = adc_to_raw(packet["adc"], dark_level, adc_max)
-        usable = packet["locked"] and packet["valid"]
+        usable = packet["locked"] and packet["valid"] and not packet["overload"]
         yield {
             "T": packet["uptime_ms"],
             "s1": s1,
@@ -246,7 +291,12 @@ def read_uart_log(
 
     Статистика: сколько байт прочитано, сколько посылок разобрано, сколько байт
     отброшено при поиске синхронизации (ложные 0xAA 0x55 и мусор), сколько
-    осталось в недочитанном хвосте и в скольких посылках нет годного измерения.
+    осталось в недочитанном хвосте, в скольких посылках нет годного измерения,
+    сколько посылок с перегрузкой тракта и какие ступени усиления встретились
+    (§5.2 — уровни отсчётов сопоставимы между посылками только в пределах одной
+    ступени). Отдельно считаются посылки с сошедшейся CRC, но блоком короче
+    текущей редакции (старые дампы ред. 1.0/1.1): они не разбираются, и без
+    этого счётчика такой лог выглядел бы просто пустым.
     """
     adc_max = cfg.ADC_MAX if adc_max is None else adc_max
     data = read_uart_bytes(path)
@@ -262,6 +312,9 @@ def read_uart_log(
         "dropped_bytes": len(data) - used - len(tail),
         "tail_bytes": len(tail),
         "no_lock": sum(1 for p in packets if not (p["locked"] and p["valid"])),
+        "short_blocks": len(blocks) - len(packets),  # блок короче ред. 1.2
+        "overload": sum(1 for p in packets if p["overload"]),
+        "gain_steps": sorted({p["gain_step"] for p in packets}),
     }
     return rows, float(adc_max), stats
 
@@ -308,9 +361,14 @@ if __name__ == "__main__":
             frame_count=p["frame_count"],
             ext_range=p["ext_range"],
             mode=p["mode"],
+            gain_step=p["gain_step"],
+            gain_auto=p["gain_auto"],
+            overload=p["overload"],
+            searching=p["searching"],
+            sum_fault=p["sum_fault"],
         )
-        same_bytes += again[3 : 3 + cfg.UART_LEN_DATA] == block
-        same_fields += parse_data_block(again[3 : 3 + cfg.UART_LEN_DATA]) == p
+        same_bytes += again[3:-2] == block
+        same_fields += parse_data_block(again[3:-2]) == p
 
     print(
         f"обратная сборка: поля {same_fields}/{len(blocks)}, "

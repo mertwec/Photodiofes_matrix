@@ -58,10 +58,18 @@ def _rows_from_log(file_path: Path):
     if is_uart_log(file_path):
         rows, adc_max, stats = read_uart_log(file_path)
         print(
-            f"[Лог] формат UART (спецификация ред. 1.1): посылок {stats['packets']}, "
+            f"[Лог] формат UART (спецификация ред. 1.2): посылок {stats['packets']}, "
             f"{stats['bytes']} байт, мусора при синхронизации {stats['dropped_bytes']} "
-            f"байт, хвост {stats['tail_bytes']} байт, без захвата {stats['no_lock']}."
+            f"байт, хвост {stats['tail_bytes']} байт, без захвата {stats['no_lock']}, "
+            f"перегрузка тракта в {stats['overload']}, "
+            f"ступени усиления {stats['gain_steps']}."
         )
+        if stats["short_blocks"]:
+            print(
+                f"[Лог] пропущено {stats['short_blocks']} посылок с блоком короче "
+                "31 байта — это дамп старой редакции протокола (1.0/1.1), "
+                "разбирается только текущая 1.2."
+            )
         return rows, adc_max, len(rows), "UART"
 
     df = read_csv_log(file_path)
@@ -185,13 +193,13 @@ def stream_cmd(port: str, baudrate: int, log: bool, comps: bool, by_angles: bool
     size = cfg.SIZE_DISPLAY
 
     # Задача №16: выбираем ридер по тому, что реально шлёт изделие — двоичные
-    # посылки (спецификация ред. 1.1) или старые ASCII-строки. Ждём первую
+    # посылки (спецификация ред. 1.2) или старые ASCII-строки. Ждём первую
     # полноценную посылку/строку (порт держится открытым), поэтому пустой порт
     # не приводит к пустому окну. Обе ветки отдают одинаковые словари строк.
     print(f"[Порт] {port}: определяем формат данных…")
     if detect_serial_format(port=port, baudrate=baudrate) == "uart":
         fmt = "UART"
-        print("[Порт] формат UART: двоичные посылки (спецификация ред. 1.1).")
+        print("[Порт] формат UART: двоичные посылки (спецификация ред. 1.2).")
         rows = read_serial_uart(port=port, baudrate=baudrate)
     else:
         fmt = "ASCII"

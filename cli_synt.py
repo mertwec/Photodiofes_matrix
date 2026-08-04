@@ -35,6 +35,12 @@ def cli():
 @click.option(
     "--noise", default=2.0, show_default=True, help="СКО шума отсчётов АЦП, единиц."
 )
+@click.option(
+    "--gain-step",
+    type=click.IntRange(0, 5),
+    default=None,
+    help="Фиксированная ступень усиления 0..5 (§5.2); по умолчанию — автовыбор изделием.",
+)
 @click.option("--seed", default=20260731, show_default=True, help="Зерно генератора шума.")
 @click.option(
     "--one-line/--per-packet-line",
@@ -50,10 +56,11 @@ def synthetic_uart_log_cmd(
     amp_y: float,
     dropout: int,
     noise: float,
+    gain_step: int | None,
     seed: int,
     one_line: bool,
 ):
-    """Синтетический лог обмена по UART (AGS 16.00.10, спецификация ред. 1.1)."""
+    """Синтетический лог обмена по UART (AGS 16.00.10, спецификация ред. 1.2)."""
     path = Path(cfg.SYNTHETIC_DIR) / logname
 
     # Кодировщик сверяется с контрольным примером §8 спецификации: если байты
@@ -72,6 +79,7 @@ def synthetic_uart_log_cmd(
         amp_y_deg=amp_y,
         dropout=dropout,
         noise_counts=noise,
+        gain_step=gain_step,
         seed=seed,
     )
 
@@ -84,6 +92,15 @@ def synthetic_uart_log_cmd(
         f"мусора при синхронизации {stats['resync_bytes']} байт, "
         f"хвост {stats['tail_bytes']} байт"
     )
+    steps = ", ".join(
+        f"{s} (×{cfg.UART_GAIN_RELATIVE[s]})" for s in stats["gain_steps"]
+    )
+    click.echo(f"Ступени усиления в логе: {steps}")
+    if stats["overload"]:
+        click.echo(
+            f"Внимание: в {stats['overload']} посылках тракт в перегрузке — "
+            f"угол там недостоверен. Понизьте --gain-step."
+        )
     if stats["saturated"]:
         click.echo(
             f"Внимание: в {stats['saturated']} посылках квадрант в насыщении — "

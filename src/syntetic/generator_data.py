@@ -7,14 +7,15 @@
    src/pipeline/syntetic_data.py).
 2. Генератор синтетического лога обмена по UART по спецификации
    DOCUMENTATION/uart_interface_specification.pdf (изделие AGS 16.00.10,
-   редакция 1.1). Формируются полноценные посылки по 35 байт:
+   редакция 1.2). Формируются полноценные посылки по 36 байт:
 
-       AA 55 | LEN=1E | блок данных 30 байт | CRC_hi CRC_lo
+       AA 55 | LEN=1F | блок данных 31 байт | CRC_hi CRC_lo
 
    Блок данных (§5): uptime_ms u32, углы X и Y как град/мин/сек, признак
    захвата, качество сигнала, счётчики достоверных/пропущенных измерений,
-   доля достоверных, поле признаков (§6), счётчик измерений и отсчёты
-   четырёх квадрантов adc_s1..adc_s4 (введены в редакции 1.1).
+   доля достоверных, поле признаков (§6), счётчик измерений, отсчёты
+   четырёх квадрантов adc_s1..adc_s4 (введены в редакции 1.1) и ступень
+   усиления приёмного тракта gain (введена в редакции 1.2, §5.2).
 
    Числовые поля блока — младшим байтом вперёд, контрольная сумма
    CRC-16/CCITT-FALSE — старшим байтом вперёд, считается по байту LEN и
@@ -22,7 +23,7 @@
 
 Кодировщик сверен с контрольным примером §8: `check_spec_example()`
 собирает посылку из значений примера и сравнивает её байт в байт с
-приведённой в спецификации (включая CRC 0x99 0x2E).
+приведённой в спецификации (включая CRC 0x57 0xA5).
 
 Физика синтетики. Спецификация (§5.1) честно предупреждает, что по
 отсчётам квадрантов угол изделия точно не восстановить: тёмновой уровень и
@@ -32,6 +33,12 @@
 D = erf(√2·FOC·tg θ / w) → §5.1 наоборот даёт отсчёты квадрантов. Углы в
 посылке — истинные (как их «вычислило» изделие), отсчёты согласованы с ними
 по rx/ry с точностью до шума и квантования.
+
+Усиление (§5.2) моделируется поверх этого: источник задаётся суммарной
+засветкой при усилении ×1, ступень выбирается автоматически (самая высокая, на
+которой Σ ещё не выходит за рабочий уровень), а отсчёты квадрантов пишутся уже
+усиленными — как их выдаёт изделие. На rx/ry ступень не влияет (общий
+множитель сокращается), поэтому углы остаются согласованными с отсчётами.
 
 Запускать из корня репозитория: `python -m src.syntetic.generator_data`
 (модуль импортирует config).
@@ -66,10 +73,19 @@ def generate_random_data(dimension: int = 2) -> list[list[float]]:
 # лежат в config.py::SensorConfig как cfg.UART_* — общие с парсером
 # src/utils/parsing_uart.py. Ниже — только параметры самой синтетики.
 
-# Σ относительной засветки четырёх квадрантов. 4000 — как в примере §8
-# (даёт качество сигнала 62). Значение задаёт «яркость» источника: при
-# сильном смещении пятна в угол квадрант упирается в cfg.UART_BRIGHT_LEVEL.
+# Рабочий уровень Σ относительной засветки четырёх квадрантов, к которому
+# автомат усиления подводит сигнал. 4000 — как в примере §8 (даёт качество
+# сигнала 62). При сильном смещении пятна в угол квадрант упирается в
+# cfg.UART_BRIGHT_LEVEL.
 TOTAL_COUNTS = 4000
+
+# Σ засветки от источника на ступени 0 (усиление ×1), то есть «яркость» самого
+# источника до усиления. 400 × 10 (ступень 2) = 4000 — режим примера §8.
+SOURCE_COUNTS = 400
+
+# Физический потолок Σ: все четыре квадранта на уровне максимальной засветки
+# (§5.1). Выше тракт уходит в перегрузку — бит 5 поля ступени усиления (§5.2).
+SAT_TOTAL = 4 * (cfg.UART_DARK_LEVEL - cfg.UART_BRIGHT_LEVEL)
 
 # Радиус пятна w [мм] по уровню 1/e² — из зафиксированной калибровки
 # DATA/CALIB/CALIBRATE.json (нож-сканирование, Задача №5).
@@ -165,6 +181,48 @@ def signal_quality(adc: Sequence[int], dark_level: int = cfg.UART_DARK_LEVEL) ->
     return min(255, max(0, round(255.0 * total / (4.0 * cfg.UART_ADC_FULL))))
 
 
+def select_gain_step(source_counts: float, target_counts: int = TOTAL_COUNTS) -> int:
+    """
+    Автоматический выбор ступени усиления (§5.2): самая высокая ступень, на
+    которой суммарная засветка источника ещё не превышает рабочего уровня.
+
+    source_counts — Σ засветки при усилении ×1. Для 400 и рабочего уровня 4000
+    выбирается ступень 2 (относительное усиление 10) — режим примера §8. Если
+    даже на ступени 0 сигнал выше рабочего уровня, остаётся ступень 0: понижать
+    усиление дальше некуда, тракт уйдёт в перегрузку.
+    """
+    step = 0
+    for i, rel in enumerate(cfg.UART_GAIN_RELATIVE):
+        if source_counts * rel <= target_counts:
+            step = i
+    return step
+
+
+def pack_gain(
+    step: int,
+    *,
+    auto: bool = True,
+    overload: bool = False,
+    searching: bool = False,
+    sum_fault: bool = False,
+) -> int:
+    """
+    Поле ступени усиления (§5.2) → байт: номер ступени в битах 0…3 и признаки
+    состояния тракта в битах 4…7. Значение 0x12 из примера §8 — ступень 2,
+    выбранная автоматически.
+    """
+    gain = step & cfg.UART_G_STEP
+    if auto:
+        gain |= cfg.UART_G_AUTO
+    if overload:
+        gain |= cfg.UART_G_OVERLOAD
+    if searching:
+        gain |= cfg.UART_G_SEARCH
+    if sum_fault:
+        gain |= cfg.UART_G_SUM_FAULT
+    return gain
+
+
 def angle_to_diff(angle_deg: float, w_mm: float = W_MM, foc_mm: float = cfg.FOC) -> float:
     """
     Угол отклонения → разностный сигнал D по нож-модели (та же, что в
@@ -193,14 +251,23 @@ def build_packet(
     frame_count: int = 0,
     ext_range: bool = False,
     mode: int = 0,
+    gain_step: int = 0,
+    gain_auto: bool = True,
+    overload: bool = False,
+    searching: bool = False,
+    sum_fault: bool = False,
 ) -> bytes:
     """
-    Собирает одну посылку (35 байт при LEN = 30) по §3/§5.
+    Собирает одну посылку (36 байт при LEN = 31) по §3/§5.
 
     `quality=None` — качество считается из отсчётов по §5.1. Углы задаются в
     градусах со знаком: в поля градусов кладётся значение со знаком
     (дополнительный код), а собственно знак дублируется битами X_NEG/Y_NEG
     поля признаков (§7) — приёмник обязан брать знак именно оттуда.
+
+    `gain_step` и признаки тракта (`gain_auto`, `overload`, `searching`,
+    `sum_fault`) идут в поле ступени усиления (§5.2): без него отсчёты
+    квадрантов не интерпретируются, так как сняты с разным усилением.
     """
     xd, xm, xs, x_neg = deg_to_dms(angle_x_deg)
     yd, ym, ys, y_neg = deg_to_dms(angle_y_deg)
@@ -216,7 +283,7 @@ def build_packet(
         flags |= cfg.UART_F_VALID
 
     block = struct.pack(
-        cfg.UART_FMT30,
+        cfg.UART_FMT31,
         uptime_ms & 0xFFFFFFFF,  # переполнение u32 ≈ через 49.7 суток (§5)
         -xd if x_neg else xd,
         xm,
@@ -232,6 +299,13 @@ def build_packet(
         flags,
         frame_count & 0xFFFFFFFF,
         *(int(v) & 0xFFFF for v in adc),
+        pack_gain(
+            gain_step,
+            auto=gain_auto,
+            overload=overload,
+            searching=searching,
+            sum_fault=sum_fault,
+        ),
     )
 
     head = bytes((cfg.UART_LEN_DATA,)) + block  # CRC считается по LEN и блоку данных
@@ -242,9 +316,10 @@ def build_packet(
 
 # Контрольный пример из §8: 123456 мс, X +6°5'21", Y −0°28'39", захват есть,
 # качество 62, 250 достоверных подряд, 0 пропусков, 98 % достоверных,
-# 51234 измерения, флаги 0x33, отсчёты 1588, 1508, 508, 588.
+# 51234 измерения, флаги 0x33, отсчёты 1588, 1508, 508, 588, ступень усиления
+# 0x12 (вторая ступень, выбрана автоматически).
 SPEC_EXAMPLE_BYTES = bytes.fromhex(
-    "AA551E"
+    "AA551F"
     "40E20100"
     "060515"
     "001C27"
@@ -256,7 +331,8 @@ SPEC_EXAMPLE_BYTES = bytes.fromhex(
     "33"
     "22C80000"
     "3406E405FC014C02"
-    "992E"
+    "12"
+    "57A5"
 )
 
 
@@ -275,6 +351,8 @@ def spec_example_packet() -> bytes:
         frame_count=51234,
         ext_range=True,
         mode=1,  # расчёт с табличной коррекцией
+        gain_step=2,  # относительное усиление 10
+        gain_auto=True,
     )
 
 
@@ -294,14 +372,15 @@ def generate_uart_packets(
     period_y_s: float = 9.0,
     w_mm: float = W_MM,
     foc_mm: float = cfg.FOC,
-    total_counts: int = TOTAL_COUNTS,
+    source_counts: int = SOURCE_COUNTS,
+    gain_step: int | None = None,
     noise_counts: float = 2.0,
     dropout: int = 0,
     seed: int | None = 20260731,
     angles_fn: Callable[[float], tuple[float, float]] | None = None,
 ) -> Iterator[bytes]:
     """
-    Поток синтетических посылок (по 35 байт) — как их выдавало бы изделие.
+    Поток синтетических посылок (по 36 байт) — как их выдавало бы изделие.
 
     Источник ходит по фигуре Лиссажу: θx = amp_x·sin(2π t/period_x),
     θy = amp_y·sin(2π t/period_y + π/3); `angles_fn(t_sec) -> (θx, θy)`
@@ -309,11 +388,21 @@ def generate_uart_packets(
     нож-моделью (`angle_to_diff`), разности — в отсчёты квадрантов
     (`adc_from_diffs`) с шумом noise_counts (СКО, единиц АЦП).
 
+    `source_counts` — Σ засветки от источника при усилении ×1. Ступень усиления
+    выбирается автоматически (`select_gain_step`, §5.2) и пишется в посылку;
+    отсчёты квадрантов усилены выбранной ступенью, поэтому читать их без неё
+    нельзя. `gain_step` фиксирует ступень принудительно (признак
+    автоматического выбора при этом снимается); если сигнал на ней выходит за
+    физический потолок SAT_TOTAL, квадранты насыщаются и ставится бит
+    перегрузки — угол такой посылки недостоверен (§5.2).
+
     `dropout` — сколько кадров в середине лога идут без источника: отсчёты
     садятся на тёмновой уровень, качество ~0, захвата нет, бит VALID снят,
-    поля углов не определены (пишутся нулями, §9), растёт consec_miss. На
-    смене признака захвата посылка формируется внеочередно — интервал между
-    соседними посылками там меньше period_ms (§1).
+    поля углов не определены (пишутся нулями, §9), растёт consec_miss, а тракт
+    переходит в поиск сигнала — ступень наращивается по одной на посылку до
+    максимальной, с установленным битом поиска (§5.2). На смене признака
+    захвата посылка формируется внеочередно — интервал между соседними
+    посылками там меньше period_ms (§1).
 
     Служебные поля ведутся сквозным счётом: uptime_ms, frame_count (темп
     измерений выше темпа выдачи, MEAS_PER_PACKET на посылку), consec_valid /
@@ -324,6 +413,11 @@ def generate_uart_packets(
 
     lost_from = max(0, (frames - dropout) // 2) if dropout > 0 else frames
     lost_to = lost_from + max(0, dropout)
+
+    gain_auto = gain_step is None
+    work_step = select_gain_step(source_counts) if gain_auto else gain_step
+    work_step = min(max(0, work_step), len(cfg.UART_GAIN_RELATIVE) - 1)
+    step = work_step
 
     uptime_ms = uptime_start_ms
     frame_count = MEAS_PER_PACKET
@@ -351,15 +445,24 @@ def generate_uart_packets(
                 )
             rx = angle_to_diff(angle_x, w_mm, foc_mm)
             ry = angle_to_diff(angle_y, w_mm, foc_mm)
+            # Сигнал есть — тракт на рабочей ступени; отсчёты уже усилены.
+            step = work_step
+            total_counts = source_counts * cfg.UART_GAIN_RELATIVE[step]
             adc = adc_from_diffs(rx, ry, total_counts, noise=noise)
+            overload = total_counts > SAT_TOTAL
+            searching = False
             ext_range = max(abs(rx), abs(ry)) > EXT_RANGE_D
             consec_valid = min(0xFFFF, consec_valid + 1)
             consec_miss = 0
             valid_total += 1
         else:
-            # Источника нет: все квадранты на тёмновом уровне, углы не определены.
+            # Источника нет: все квадранты на тёмновом уровне, углы не определены,
+            # тракт ищет сигнал и последовательно наращивает усиление (§5.2).
             angle_x = angle_y = 0.0
             adc = adc_from_diffs(0.0, 0.0, 0, noise=noise)
+            step = min(step + 1, len(cfg.UART_GAIN_RELATIVE) - 1) if gain_auto else step
+            overload = False
+            searching = True
             ext_range = False
             consec_miss = min(0xFFFF, consec_miss + 1)
             consec_valid = 0
@@ -378,6 +481,10 @@ def generate_uart_packets(
             ext_range=ext_range,
             # Расчёт с табличной коррекцией вне основной линейной зоны (§6).
             mode=1 if ext_range else 0,
+            gain_step=step,
+            gain_auto=gain_auto,
+            overload=overload,
+            searching=searching,
         )
 
 
@@ -392,8 +499,8 @@ def generate_uart_log(
     Пишет синтетический лог обмена по UART в текстовый hex-дамп.
 
     Формат файла — как у снятого с линии DATA/UART_LOG/log.txt: байты в
-    верхнем регистре через пробел. По умолчанию одна посылка на строку (35
-    байт, 105 символов), `one_line=True` — весь поток одной строкой, как в
+    верхнем регистре через пробел. По умолчанию одна посылка на строку (36
+    байт, 108 символов), `one_line=True` — весь поток одной строкой, как в
     реальном дампе. Пробелы и переводы строк одинаково съедаются
     `bytes.fromhex`, так что байтовый поток от разбивки не зависит.
 
@@ -410,8 +517,9 @@ def generate_uart_log(
     out_path.write_text(dump + "\n", encoding="ascii")
 
     # Отсчёты квадрантов лежат в конце блока данных (смещение 22 в блоке, 25 в
-    # посылке). Упёршийся в bright_level квадрант — насыщение: rx/ry в таком
-    # кадре уже не совпадут с углом, о чём есть смысл сообщить.
+    # посылке), сразу за ними — байт ступени усиления (30 и 33). Упёршийся в
+    # bright_level квадрант — насыщение: rx/ry в таком кадре уже не совпадут с
+    # углом, о чём есть смысл сообщить.
     bright = cfg.UART_BRIGHT_LEVEL
     saturated = sum(1 for p in packets if min(struct.unpack("<4H", p[25:33])) <= bright)
 
@@ -420,6 +528,8 @@ def generate_uart_log(
         "packets": len(packets),
         "bytes": sum(len(p) for p in packets),
         "saturated": saturated,
+        "gain_steps": sorted({p[33] & cfg.UART_G_STEP for p in packets}),
+        "overload": sum(1 for p in packets if p[33] & cfg.UART_G_OVERLOAD),
         **verify_uart_log(out_path),
     }
 

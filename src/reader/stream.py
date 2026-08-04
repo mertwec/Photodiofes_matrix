@@ -86,7 +86,7 @@ def read_serial_uart(
     """
     Подключается к UART и отдаёт строки датчиков из ДВОИЧНЫХ посылок (Задача №16).
 
-    Формат — DOCUMENTATION/uart_interface_specification.pdf (редакция 1.1),
+    Формат — DOCUMENTATION/uart_interface_specification.pdf (редакция 1.2),
     разбор целиком в src/utils/parsing_uart.py. Отличие от read_serial_rows
     только в источнике: здесь не строки ASCII, а поток байт, из которого
     посылки выделяются по синхробайтам + сошедшейся CRC (`extract_frames`).
